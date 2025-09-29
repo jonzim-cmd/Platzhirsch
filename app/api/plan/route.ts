@@ -7,6 +7,7 @@ export async function GET(req: NextRequest) {
   const ownerProfileId = searchParams.get('ownerProfileId') || ''
   const classId = searchParams.get('classId') || ''
   const roomId = searchParams.get('roomId') || ''
+  const includeLead = searchParams.get('includeLead') === '1'
   const create = searchParams.get('create') === '1'
   if (!ownerProfileId || !classId || !roomId) {
     return NextResponse.json({ error: 'missing params' }, { status: 400 })
@@ -43,7 +44,18 @@ export async function GET(req: NextRequest) {
   }
 
   if (!plan) return NextResponse.json({ error: 'not found' }, { status: 404 })
-  return NextResponse.json(plan)
+
+  if (!includeLead) return NextResponse.json({ plan })
+
+  const cls = await prisma.class.findUnique({ where: { id: classId } })
+  let leadPlan = null as any
+  if (cls?.leadProfileId) {
+    leadPlan = await prisma.seatingPlan.findUnique({
+      where: { ownerProfileId_classId_roomId: { ownerProfileId: cls.leadProfileId, classId, roomId } },
+      include: { elements: true }
+    })
+  }
+  return NextResponse.json({ plan, leadPlan })
 }
 
 export async function POST(req: NextRequest) {
@@ -77,4 +89,3 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true })
 }
-

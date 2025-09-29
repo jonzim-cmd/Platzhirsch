@@ -42,6 +42,8 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   const [classId, setClassId] = useState('')
   const [roomId, setRoomId] = useState('')
   const [plan, setPlan] = useState<Plan | null>(null)
+  const [leadPlan, setLeadPlan] = useState<Plan | null>(null)
+  const [viewMode, setViewMode] = useState<'owner' | 'lead'>('owner')
   const [elements, setElements] = useState<Element[]>([])
   const [students, setStudents] = useState<{ id: string; foreName: string }[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -71,11 +73,12 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
 
   const loadPlan = useCallback(async (create: boolean) => {
     if (!activeProfile?.id || !classId || !roomId) return
-    const res = await fetch(`/api/plan?ownerProfileId=${activeProfile.id}&classId=${classId}&roomId=${roomId}&create=${create ? '1' : '0'}`)
+    const res = await fetch(`/api/plan?ownerProfileId=${activeProfile.id}&classId=${classId}&roomId=${roomId}&create=${create ? '1' : '0'}&includeLead=1`)
     if (!res.ok) return
     const data = await res.json()
-    setPlan(data)
-    setElements(data.elements.map((e: any) => ({ ...e })))
+    setPlan(data.plan)
+    setLeadPlan(data.leadPlan)
+    setElements(data.plan.elements.map((e: any) => ({ ...e })))
     setSelectedId(null)
   }, [activeProfile?.id, classId, roomId])
 
@@ -100,8 +103,11 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
 
   const selected = useMemo(() => elements.find(e => e.id === selectedId), [elements, selectedId])
 
+  const readOnly = viewMode === 'lead'
+
   // Group handling: move whole group
   const moveElementBy = (id: string, dx: number, dy: number) => {
+    if (readOnly) return
     setElements(prev => {
       const el = prev.find(e => e.id === id)
       if (!el) return prev
@@ -113,6 +119,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
 
   const onDragEnd = (id: string) => {
     // Heften: if any element intersects, share groupId
+    if (readOnly) return
     setElements(prev => {
       const current = prev.find(e => e.id === id)
       if (!current) return prev
@@ -139,6 +146,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   }
 
   const addElement = (type: ElementType, refId?: string) => {
+    if (readOnly) return
     const base: Element = { id: uid('el'), type, refId: refId ?? null, x: 120, y: 120, w: 80, h: 50, rotation: 0, z: elements.length, groupId: null }
     if (type === 'WINDOW_SIDE' || type === 'WALL_SIDE') { base.w = 240; base.h = 8 }
     if (type === 'DOOR') { base.w = 36; base.h = 8 }
@@ -148,7 +156,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   }
 
   const removeSelected = () => {
-    if (!selectedId) return
+    if (readOnly || !selectedId) return
     setElements(prev => prev.filter(e => e.id !== selectedId))
     setSelectedId(null)
     scheduleSave()
@@ -167,6 +175,36 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     obs.observe(el)
     return () => obs.disconnect()
   }, [])
+
+  // Export helpers
+  const canvasRef = useRef<HTMLDivElement>(null)
+  async function exportPng() {
+    if (!canvasRef.current) return
+    const { toPng } = await import('html-to-image')
+    const dataUrl = await toPng(canvasRef.current, { cacheBust: true, pixelRatio: 2 })
+    const a = document.createElement('a')
+    a.href = dataUrl
+    a.download = `sitzplan-${classId}-${roomId}.png`
+    a.click()
+  }
+  async function exportPdf() {
+    if (!canvasRef.current) return
+    const [{ toPng }, { jsPDF }] = await Promise.all([import('html-to-image'), import('jspdf')])
+    const dataUrl = await toPng(canvasRef.current, { cacheBust: true, pixelRatio: 2 })
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
+    const pageW = pdf.internal.pageSize.getWidth()
+    const pageH = pdf.internal.pageSize.getHeight()
+    const img = new Image()
+    img.src = dataUrl
+    await new Promise((res) => { img.onload = res })
+    const ratio = Math.min(pageW / img.width, pageH / img.height)
+    const w = img.width * ratio
+    const h = img.height * ratio
+    const x = (pageW - w) / 2
+    const y = (pageH - h) / 2
+    pdf.addImage(dataUrl, 'PNG', x, y, w, h)
+    pdf.save(`sitzplan-${classId}-${roomId}.pdf`)
+  }
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
@@ -188,6 +226,13 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
               </select>
             </label>
             <Button onClick={() => loadPlan(true)} variant="primary" disabled={!activeProfile || !classId || !roomId}>Plan laden/erstellen</Button>
+            {leadPlan && (
+              <div className="ml-2 flex items-center gap-2 text-xs">
+                <span className="text-fg-muted">Ansicht:</span>
+                <Button onClick={() => setViewMode('owner')} className={viewMode==='owner'?'bg-primary/20 text-primary':''}>Eigen</Button>
+                <Button onClick={() => setViewMode('lead')} className={viewMode==='lead'?'bg-primary/20 text-primary':''}>Klassenleitung</Button>
+              </div>
+            )}
           </div>
           <div className="text-xs text-fg-muted">
             {activeProfile ? `Profil: ${activeProfile.name}` : 'Kein aktives Profil gewählt'}
@@ -197,13 +242,14 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         </div>
 
         <div ref={frameRef} className="relative h-[70vh] w-full overflow-auto">
-          <div className="relative" style={{ width: frameSize.w, height: frameSize.h }}>
-            {elements.map(el => (
+          <div ref={canvasRef} className="relative" style={{ width: frameSize.w, height: frameSize.h }}>
+            {(viewMode==='owner' ? elements : (leadPlan?.elements || [])).map(el => (
               <div
                 key={el.id}
                 role="button"
-                onClick={() => setSelectedId(el.id!)}
+                onClick={() => !readOnly && setSelectedId(el.id!)}
                 className={`absolute select-none ${selectedId === el.id ? 'ring-2 ring-primary/60' : ''}`}
+                data-el={el.id}
                 style={{ left: el.x, top: el.y, width: el.w, height: el.h, transform: `rotate(${el.rotation}deg)`, zIndex: el.z }}
               >
                 <div className="h-full w-full rounded border border-neutral-700 bg-neutral-800/60 flex items-center justify-center text-xs">
@@ -213,7 +259,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
                   {el.type === 'WINDOW_SIDE' && <span>Fensterseite</span>}
                   {el.type === 'WALL_SIDE' && <span>Wandseite</span>}
                 </div>
-                {selectedId === el.id && (
+                {!readOnly && selectedId === el.id && (
                   <Moveable
                     target={() => document.querySelector(`[data-el='${el.id}']`) as HTMLElement}
                     // Fallback target: current parent
@@ -249,6 +295,22 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         </div>
       </div>
       <aside className="lg:col-span-1 grid content-start gap-4">
+        {leadPlan && viewMode==='lead' && (
+          <div className="rounded border border-neutral-900 p-3 grid gap-2">
+            <div className="text-sm font-medium">KL-Plan</div>
+            <div className="text-xs text-fg-muted">Du kannst den Plan der Klassenleitung ansehen. Änderungen sind hier nicht möglich.</div>
+            {activeProfile && (
+              <Button
+                variant="primary"
+                onClick={async () => {
+                  await fetch('/api/plan/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ownerProfileId: activeProfile.id, classId, roomId, sourcePlanId: leadPlan!.id }) })
+                  setViewMode('owner')
+                  await loadPlan(false)
+                }}
+              >Als Kopie übernehmen</Button>
+            )}
+          </div>
+        )}
         <div className="rounded border border-neutral-900 p-3">
           <div className="text-sm font-medium mb-2">Palette</div>
           <div className="flex flex-wrap gap-2">
@@ -279,8 +341,14 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
             </>
           )}
         </div>
+        <div className="rounded border border-neutral-900 p-3 grid gap-2">
+          <div className="text-sm font-medium">Export</div>
+          <div className="flex gap-2">
+            <Button onClick={exportPng}>PNG</Button>
+            <Button onClick={exportPdf}>PDF (A4 Quer)</Button>
+          </div>
+        </div>
       </aside>
     </div>
   )
 }
-
