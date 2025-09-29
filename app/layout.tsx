@@ -1,6 +1,6 @@
 import './globals.css'
 import type { Metadata } from 'next'
-import { Nav } from '@/components/Layout/Nav'
+import { TopBar } from '@/components/Layout/TopBar'
 
 export const metadata: Metadata = {
   title: 'Sitzplan',
@@ -11,7 +11,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="de" className="dark">
       <body>
-        <Nav />
+        <TopBar />
         {children}
       </body>
     </html>

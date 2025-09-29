@@ -48,6 +48,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   const [students, setStudents] = useState<{ id: string; foreName: string }[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const saveTimer = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
@@ -55,6 +56,11 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       try {
         const raw = localStorage.getItem('activeProfile')
         setActiveProfile(raw ? JSON.parse(raw) : null)
+        const url = new URL(window.location.href)
+        const c = url.searchParams.get('c')
+        const r = url.searchParams.get('r')
+        if (c) setClassId(c)
+        if (r) setRoomId(r)
       } catch { setActiveProfile(null) }
     }
     read()
@@ -208,34 +214,18 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-      <div className="lg:col-span-4 min-h-[60vh] rounded border border-neutral-900 bg-neutral-950/40">
-        <div className="flex items-center justify-between border-b border-neutral-900 px-3 py-2 text-sm">
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-2">
-              <span className="text-fg-muted">Klasse</span>
-              <select value={classId} onChange={e => setClassId(e.target.value)} className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800">
-                <option value="">– wählen –</option>
-                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </label>
-            <label className="flex items-center gap-2">
-              <span className="text-fg-muted">Raum</span>
-              <select value={roomId} onChange={e => setRoomId(e.target.value)} className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800">
-                <option value="">– wählen –</option>
-                {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-              </select>
-            </label>
-            <Button onClick={() => loadPlan(true)} variant="primary" disabled={!activeProfile || !classId || !roomId}>Plan laden/erstellen</Button>
-            {leadPlan && (
-              <div className="ml-2 flex items-center gap-2 text-xs">
-                <span className="text-fg-muted">Ansicht:</span>
-                <Button onClick={() => setViewMode('owner')} className={viewMode==='owner'?'bg-primary/20 text-primary':''}>Eigen</Button>
-                <Button onClick={() => setViewMode('lead')} className={viewMode==='lead'?'bg-primary/20 text-primary':''}>Klassenleitung</Button>
-              </div>
-            )}
-          </div>
-          <div className="text-xs text-fg-muted">
-            {activeProfile ? `Profil: ${activeProfile.name}` : 'Kein aktives Profil gewählt'}
+      <div className="lg:col-span-5 min-h-[60vh] rounded border border-neutral-900 bg-neutral-950/40 relative">
+        {/* Floating toolbar: plan load and view toggle */}
+        <div className="pointer-events-auto absolute right-3 top-3 z-10 flex items-center gap-2 text-xs">
+          <Button onClick={() => loadPlan(true)} variant="primary" disabled={!activeProfile || !classId || !roomId}>Plan laden/erstellen</Button>
+          {leadPlan && (
+            <div className="ml-2 flex items-center gap-2">
+              <span className="text-fg-muted">Ansicht:</span>
+              <Button onClick={() => setViewMode('owner')} className={viewMode==='owner'?'bg-primary/20 text-primary':''}>Eigen</Button>
+              <Button onClick={() => setViewMode('lead')} className={viewMode==='lead'?'bg-primary/20 text-primary':''}>KL</Button>
+            </div>
+          )}
+          <div className="text-fg-muted">
             {saving === 'saving' && <span className="ml-3">Speichern…</span>}
             {saving === 'saved' && <span className="ml-3 text-primary">Gespeichert</span>}
           </div>
@@ -294,7 +284,8 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
           </div>
         </div>
       </div>
-      <aside className="lg:col-span-1 grid content-start gap-4">
+      {/* Collapsible Sidebar */}
+      <aside className={`fixed left-0 top-[48px] z-20 h-[calc(100vh-48px)] w-72 transform border-r border-neutral-900 bg-bg-soft p-3 transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         {leadPlan && viewMode==='lead' && (
           <div className="rounded border border-neutral-900 p-3 grid gap-2">
             <div className="text-sm font-medium">KL-Plan</div>
@@ -349,6 +340,8 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
           </div>
         </div>
       </aside>
+      {/* Toggle button */}
+      <button aria-label="Werkzeuge" onClick={()=>setSidebarOpen(s=>!s)} className="fixed left-2 top-[56px] z-30 rounded bg-neutral-800 px-2 py-1 text-sm hover:bg-neutral-700">{sidebarOpen ? '⟨ schließen' : 'Werkzeuge ⟩'}</button>
     </div>
   )
 }
