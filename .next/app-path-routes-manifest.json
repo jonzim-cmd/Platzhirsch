@@ -1,1 +1,1 @@
-{"/_not-found/page":"/_not-found","/rooms/page":"/rooms","/students/page":"/students","/page":"/","/profiles/page":"/profiles","/import/page":"/import","/classes/page":"/classes"}
+{"/_not-found/page":"/_not-found","/api/students/route":"/api/students","/classes/page":"/classes","/editor/page":"/editor","/page":"/","/profiles/page":"/profiles","/students/page":"/students","/rooms/page":"/rooms","/api/plan/route":"/api/plan","/import/page":"/import"}

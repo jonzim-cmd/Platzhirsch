@@ -12,6 +12,7 @@ export function Nav() {
           <Link href="/rooms" className="hover:text-fg">Räume</Link>
           <Link href="/students" className="hover:text-fg">Schüler</Link>
           <Link href="/import" className="hover:text-fg">Import</Link>
+          <Link href="/editor" className="hover:text-fg">Editor</Link>
           <ActiveProfileNav />
         </nav>
       </div>
