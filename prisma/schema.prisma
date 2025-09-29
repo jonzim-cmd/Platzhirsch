@@ -13,6 +13,7 @@ model Profile {
   name  String  @unique
   ownedPlans SeatingPlan[]
   leadClasses Class[] @relation("ClassLead")
+  classes ProfileClass[]
 }
 
 model Class {
@@ -22,8 +23,18 @@ model Class {
   leadProfileId String?
   students      Student[]
   plans         SeatingPlan[]
+  profiles      ProfileClass[]
 
   @@unique([name])
+}
+
+model ProfileClass {
+  profileId String
+  classId   String
+  profile   Profile @relation(fields: [profileId], references: [id])
+  class     Class   @relation(fields: [classId], references: [id])
+
+  @@id([profileId, classId])
 }
 
 model Room {
@@ -91,4 +102,3 @@ enum ElementType {
   WINDOW_SIDE
   WALL_SIDE
 }
-
