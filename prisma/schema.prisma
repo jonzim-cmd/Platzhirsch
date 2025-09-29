@@ -1,0 +1,94 @@
+// Prisma schema for Sitzplan tool
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Profile {
+  id    String  @id @default(cuid())
+  name  String  @unique
+  ownedPlans SeatingPlan[]
+  leadClasses Class[] @relation("ClassLead")
+}
+
+model Class {
+  id            String   @id @default(cuid())
+  name          String
+  leadProfile   Profile? @relation("ClassLead", fields: [leadProfileId], references: [id])
+  leadProfileId String?
+  students      Student[]
+  plans         SeatingPlan[]
+
+  @@unique([name])
+}
+
+model Room {
+  id    String @id @default(cuid())
+  name  String
+  type  RoomType @default(NORMAL)
+  plans SeatingPlan[]
+
+  @@unique([name])
+}
+
+enum RoomType {
+  NORMAL
+  ADHOC
+}
+
+model Student {
+  id          String @id @default(cuid())
+  class       Class  @relation(fields: [classId], references: [id])
+  classId     String
+  foreName    String
+  externalKey String @unique
+  active      Boolean @default(true)
+  // optional future fields: meta JSON
+}
+
+model SeatingPlan {
+  id              String   @id @default(cuid())
+  owner           Profile  @relation(fields: [ownerProfileId], references: [id])
+  ownerProfileId  String
+  class           Class    @relation(fields: [classId], references: [id])
+  classId         String
+  room            Room     @relation(fields: [roomId], references: [id])
+  roomId          String
+  sourcePlan      SeatingPlan? @relation("PlanSource", fields: [sourcePlanId], references: [id])
+  sourcePlanId    String?
+  derivedPlans    SeatingPlan[] @relation("PlanSource")
+  title           String?
+  updatedAt       DateTime @updatedAt
+  elements        SeatingElement[]
+
+  @@unique([ownerProfileId, classId, roomId])
+}
+
+model SeatingElement {
+  id            String @id @default(cuid())
+  seatingPlan   SeatingPlan @relation(fields: [seatingPlanId], references: [id])
+  seatingPlanId String
+  type          ElementType
+  refId         String?
+  x             Float
+  y             Float
+  w             Float
+  h             Float
+  rotation      Float @default(0)
+  z             Int   @default(0)
+  groupId       String?
+  meta          Json?
+}
+
+enum ElementType {
+  STUDENT
+  TEACHER_DESK
+  DOOR
+  WINDOW_SIDE
+  WALL_SIDE
+}
+

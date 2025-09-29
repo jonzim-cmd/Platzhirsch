@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  @apply dark;
+}
+
+body {
+  @apply bg-bg text-fg antialiased;
+}
+
+.container {
+  @apply mx-auto px-4;
+}
+
