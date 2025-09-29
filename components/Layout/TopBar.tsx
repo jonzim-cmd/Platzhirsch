@@ -16,6 +16,7 @@ export function TopBar() {
   const [roomId, setRoomId] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [createMode, setCreateMode] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useEffect(() => {
     fetch('/api/profiles').then(r=>r.json()).then(setProfiles).catch(()=>{})
@@ -70,42 +71,49 @@ export function TopBar() {
 
   return (
     <header className="border-b border-neutral-900 bg-bg-soft/60 backdrop-blur">
-      <div className="container flex h-12 items-center gap-3">
-        {/* Profile */}
-        <select
-          value={activeProfile?.id || ''}
-          onChange={(e) => {
-            if (e.target.value === '__new__') { setCreateMode(true); setSettingsOpen(true); return }
-            const p = profiles.find(x => x.id === e.target.value) || null
-            setActiveProfile(p)
-          }}
-          className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800"
-        >
-          <option value="">{profileLabel}</option>
-          {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          <option value="__new__">+ Profil anlegen…</option>
-        </select>
+      <div className="container flex h-12 items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Button aria-label="Sidebar umschalten" onClick={() => {
+            const next = !sidebarOpen
+            setSidebarOpen(next)
+            window.dispatchEvent(new StorageEvent('storage', { key: 'sidebar', newValue: JSON.stringify({ open: next }) }))
+          }}>☰</Button>
+          {/* Profile */}
+          <select
+            value={activeProfile?.id || ''}
+            onChange={(e) => {
+              if (e.target.value === '__new__') { setCreateMode(true); setSettingsOpen(true); return }
+              const p = profiles.find(x => x.id === e.target.value) || null
+              setActiveProfile(p)
+            }}
+            className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800"
+          >
+            <option value="">{profileLabel}</option>
+            {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            <option value="__new__">+ Profil anlegen…</option>
+          </select>
 
-        {/* Class */}
-        <select
-          value={classId}
-          onChange={(e)=>setClassId(e.target.value)}
-          disabled={!activeProfile}
-          className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800 disabled:opacity-50"
-        >
-          <option value="">Klasse wählen…</option>
-          {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+          {/* Class */}
+          <select
+            value={classId}
+            onChange={(e)=>setClassId(e.target.value)}
+            disabled={!activeProfile}
+            className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800 disabled:opacity-50"
+          >
+            <option value="">Klasse wählen…</option>
+            {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
 
-        {/* Room */}
-        <select
-          value={roomId}
-          onChange={(e)=>setRoomId(e.target.value)}
-          className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800"
-        >
-          <option value="">Raum wählen…</option>
-          {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-        </select>
+          {/* Room */}
+          <select
+            value={roomId}
+            onChange={(e)=>setRoomId(e.target.value)}
+            className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800"
+          >
+            <option value="">Raum wählen…</option>
+            {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        </div>
 
         {/* Settings */}
         <Button aria-label="Einstellungen" onClick={() => { setCreateMode(false); setSettingsOpen(true) }}>⚙️</Button>
@@ -135,4 +143,3 @@ export function TopBar() {
     </header>
   )
 }
-

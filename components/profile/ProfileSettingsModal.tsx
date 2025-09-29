@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { Modal } from '@/components/ui/Modal'
 
 type Profile = { id: string; name: string } | null
 type ClassRow = { id: string; name: string; assigned: boolean; leadProfileId: string | null }
@@ -65,8 +66,8 @@ export function ProfileSettingsModal({ createMode, profile, onClose }: { createM
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60">
-      <div className="w-[min(90vw,800px)] rounded border border-neutral-800 bg-bg-soft p-4">
+    <Modal onClose={()=>onClose(false)}>
+      <div className="w-[min(90vw,800px)] rounded border border-neutral-800 bg-bg-soft p-4 shadow-xl">
         <div className="flex items-center justify-between">
           <div className="text-lg font-medium">{createMode ? 'Profil anlegen' : 'Profil bearbeiten'}</div>
           <button className="text-fg-muted hover:text-fg" onClick={() => onClose(!!changed)}>✕</button>
@@ -103,13 +104,24 @@ export function ProfileSettingsModal({ createMode, profile, onClose }: { createM
               </table>
             </div>
           </div>
-          <div className="flex justify-end gap-2">
-            <Button onClick={()=>onClose(!!changed)}>Abbrechen</Button>
-            <Button variant="primary" onClick={save} disabled={loading || !name.trim()}>{createMode ? 'Anlegen' : 'Speichern'}</Button>
+          <div className="flex justify-between gap-2">
+            {!createMode && profile?.id && (
+              <Button
+                variant="danger"
+                onClick={async () => {
+                  if (!confirm('Profil und zugehörige Pläne wirklich löschen?')) return
+                  await fetch(`/api/profiles/${profile.id}`, { method: 'DELETE' })
+                  onClose(true)
+                }}
+              >Profil löschen</Button>
+            )}
+            <div className="flex gap-2">
+              <Button onClick={()=>onClose(!!changed)}>Abbrechen</Button>
+              <Button variant="primary" onClick={save} disabled={loading || !name.trim()}>{createMode ? 'Anlegen' : 'Speichern'}</Button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
-

@@ -66,6 +66,12 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     read()
     const h = () => read()
     window.addEventListener('storage', h)
+    const onSidebar = (e: StorageEvent) => {
+      if (e.key === 'sidebar' && e.newValue) {
+        try { const v = JSON.parse(e.newValue); setSidebarOpen(!!v.open) } catch{}
+      }
+    }
+    window.addEventListener('storage', onSidebar)
     return () => window.removeEventListener('storage', h)
   }, [])
 
@@ -284,8 +290,23 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
           </div>
         </div>
       </div>
-      {/* Collapsible Sidebar */}
+      {/* Collapsible Sidebar (like ChatGPT) */}
       <aside className={`fixed left-0 top-[48px] z-20 h-[calc(100vh-48px)] w-72 transform border-r border-neutral-900 bg-bg-soft p-3 transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="rounded border border-neutral-900 p-3 mb-3 grid gap-2">
+          <div className="text-sm font-medium mb-1">Plan</div>
+          <Button onClick={() => loadPlan(true)} variant="primary" disabled={!activeProfile || !classId || !roomId}>Plan laden/erstellen</Button>
+          {leadPlan && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-fg-muted">Ansicht:</span>
+              <Button onClick={() => setViewMode('owner')} className={viewMode==='owner'?'bg-primary/20 text-primary':''}>Eigen</Button>
+              <Button onClick={() => setViewMode('lead')} className={viewMode==='lead'?'bg-primary/20 text-primary':''}>KL</Button>
+            </div>
+          )}
+          <div className="text-xs text-fg-muted">
+            {saving === 'saving' && <span>Speichern…</span>}
+            {saving === 'saved' && <span className="text-primary">Gespeichert</span>}
+          </div>
+        </div>
         {leadPlan && viewMode==='lead' && (
           <div className="rounded border border-neutral-900 p-3 grid gap-2">
             <div className="text-sm font-medium">KL-Plan</div>
@@ -340,8 +361,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
           </div>
         </div>
       </aside>
-      {/* Toggle button */}
-      <button aria-label="Werkzeuge" onClick={()=>setSidebarOpen(s=>!s)} className="fixed left-2 top-[56px] z-30 rounded bg-neutral-800 px-2 py-1 text-sm hover:bg-neutral-700">{sidebarOpen ? '⟨ schließen' : 'Werkzeuge ⟩'}</button>
+      {/* No floating toggle; controlled from TopBar */}
     </div>
   )
 }
