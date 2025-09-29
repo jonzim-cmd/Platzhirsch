@@ -116,6 +116,11 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
 
   const selected = useMemo(() => elements.find(e => e.id === selectedId), [elements, selectedId])
   const selectedTarget = useMemo(() => (selectedId ? elementRefs.current.get(selectedId) ?? null : null), [selectedId, elements])
+  const studentById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const s of students) m.set(s.id, s.foreName)
+    return m
+  }, [students])
 
   const readOnly = viewMode === 'lead'
 
@@ -260,7 +265,9 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
                 <div className="h-full w-full rounded border border-neutral-700 bg-neutral-800/60 flex items-center justify-center"
                   style={{ fontSize: (el.meta?.fontSize ?? 12) + 'px' }}
                 >
-                  {el.type === 'STUDENT' && <span>Schüler{el.refId ? '' : ' (leer)'}</span>}
+                  {el.type === 'STUDENT' && (
+                    <span>{el.refId ? (studentById.get(String(el.refId)) || 'Schüler') : 'Schüler (leer)'}</span>
+                  )}
                   {el.type === 'TEACHER_DESK' && <span>Lehrerpult</span>}
                   {el.type === 'DOOR' && <span>Tür</span>}
                   {el.type === 'WINDOW_SIDE' && <span>Fensterseite</span>}
