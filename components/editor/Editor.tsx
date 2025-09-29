@@ -49,6 +49,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const elementRefs = useRef<Map<string, HTMLElement>>(new Map())
   const saveTimer = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
@@ -114,6 +115,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   }, [plan, elements])
 
   const selected = useMemo(() => elements.find(e => e.id === selectedId), [elements, selectedId])
+  const selectedTarget = useMemo(() => (selectedId ? elementRefs.current.get(selectedId) ?? null : null), [selectedId, elements])
 
   const readOnly = viewMode === 'lead'
 
@@ -159,7 +161,8 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
 
   const addElement = (type: ElementType, refId?: string) => {
     if (readOnly) return
-    const base: Element = { id: uid('el'), type, refId: refId ?? null, x: 120, y: 120, w: 80, h: 50, rotation: 0, z: elements.length, groupId: null }
+    const startX = sidebarOpen ? 320 : 120
+    const base: Element = { id: uid('el'), type, refId: refId ?? null, x: startX, y: 120, w: 80, h: 50, rotation: 0, z: elements.length, groupId: null, meta: { fontSize: 12 } }
     if (type === 'WINDOW_SIDE' || type === 'WALL_SIDE') { base.w = 240; base.h = 8 }
     if (type === 'DOOR') { base.w = 36; base.h = 8 }
     if (type === 'TEACHER_DESK') { base.w = 200; base.h = 60 }
@@ -238,7 +241,12 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         </div>
 
         <div ref={frameRef} className="relative h-[70vh] w-full overflow-auto">
-          <div ref={canvasRef} className="relative" style={{ width: frameSize.w, height: frameSize.h }}>
+          <div
+            ref={canvasRef}
+            className="relative"
+            style={{ width: frameSize.w, height: frameSize.h }}
+            onMouseDown={(e) => { if (e.target === canvasRef.current) setSelectedId(null) }}
+          >
             {(viewMode==='owner' ? elements : (leadPlan?.elements || [])).map(el => (
               <div
                 key={el.id}
@@ -247,46 +255,51 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
                 className={`absolute select-none ${selectedId === el.id ? 'ring-2 ring-primary/60' : ''}`}
                 data-el={el.id}
                 style={{ left: el.x, top: el.y, width: el.w, height: el.h, transform: `rotate(${el.rotation}deg)`, zIndex: el.z }}
+                ref={(node) => { if (node) elementRefs.current.set(el.id!, node); else elementRefs.current.delete(el.id!) }}
               >
-                <div className="h-full w-full rounded border border-neutral-700 bg-neutral-800/60 flex items-center justify-center text-xs">
+                <div className="h-full w-full rounded border border-neutral-700 bg-neutral-800/60 flex items-center justify-center"
+                  style={{ fontSize: (el.meta?.fontSize ?? 12) + 'px' }}
+                >
                   {el.type === 'STUDENT' && <span>Schüler{el.refId ? '' : ' (leer)'}</span>}
                   {el.type === 'TEACHER_DESK' && <span>Lehrerpult</span>}
                   {el.type === 'DOOR' && <span>Tür</span>}
                   {el.type === 'WINDOW_SIDE' && <span>Fensterseite</span>}
                   {el.type === 'WALL_SIDE' && <span>Wandseite</span>}
                 </div>
-                {!readOnly && selectedId === el.id && (
-                  <Moveable
-                    target={() => document.querySelector(`[data-el='${el.id}']`) as HTMLElement}
-                    // Fallback target: current parent
-                    draggable
-                    resizable
-                    rotatable
-                    throttleDrag={0}
-                    throttleResize={0}
-                    throttleRotate={0}
-                    snappable
-                    snapThreshold={10}
-                    elementGuidelines={[]}
-                    bounds={{ left: 0, top: 0, right: frameSize.w, bottom: frameSize.h }}
-                    onDrag={(e) => {
-                      const dx = e.beforeDelta[0]
-                      const dy = e.beforeDelta[1]
-                      moveElementBy(el.id!, dx, dy)
-                    }}
-                    onDragEnd={() => onDragEnd(el.id!)}
-                    onResize={(e) => {
-                      setElements(prev => prev.map(x => x.id === el.id ? { ...x, w: Math.max(10, e.width), h: Math.max(10, e.height), x: x.x + e.delta[0], y: x.y + e.delta[1] } : x))
-                    }}
-                    onResizeEnd={() => scheduleSave()}
-                    onRotate={(e) => {
-                      setElements(prev => prev.map(x => x.id === el.id ? { ...x, rotation: e.beforeRotate } : x))
-                    }}
-                    onRotateEnd={() => scheduleSave()}
-                  />
-                )}
               </div>
             ))}
+            {!readOnly && selectedTarget && (
+              <Moveable
+                target={selectedTarget as HTMLElement}
+                draggable
+                resizable
+                rotatable
+                throttleDrag={0}
+                throttleResize={0}
+                throttleRotate={0}
+                snappable
+                snapThreshold={10}
+                elementGuidelines={[]}
+                bounds={{ left: 0, top: 0, right: frameSize.w, bottom: frameSize.h }}
+                onDrag={(e) => {
+                  if (!selectedId) return
+                  const dx = e.beforeDelta[0]
+                  const dy = e.beforeDelta[1]
+                  moveElementBy(selectedId, dx, dy)
+                }}
+                onDragEnd={() => { if (selectedId) onDragEnd(selectedId) }}
+                onResize={(e) => {
+                  if (!selectedId) return
+                  setElements(prev => prev.map(x => x.id === selectedId ? { ...x, w: Math.max(10, e.width), h: Math.max(10, e.height), x: x.x + e.delta[0], y: x.y + e.delta[1] } : x))
+                }}
+                onResizeEnd={() => scheduleSave()}
+                onRotate={(e) => {
+                  if (!selectedId) return
+                  setElements(prev => prev.map(x => x.id === selectedId ? { ...x, rotation: e.beforeRotate } : x))
+                }}
+                onRotateEnd={() => scheduleSave()}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -347,6 +360,21 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
           {selected && (
             <>
               <div className="text-xs text-fg-muted">Typ: {selected.type}</div>
+              <label className="text-xs text-fg-muted flex items-center gap-2">
+                <span>Schriftgröße</span>
+                <input
+                  type="range"
+                  min={8}
+                  max={24}
+                  value={selected.meta?.fontSize ?? 12}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10)
+                    setElements(prev => prev.map(x => x.id === selected.id ? { ...x, meta: { ...(x.meta||{}), fontSize: v } } : x))
+                    scheduleSave()
+                  }}
+                />
+                <span className="tabular-nums">{selected.meta?.fontSize ?? 12}px</span>
+              </label>
               <div className="flex gap-2">
                 <Button onClick={removeSelected} variant="danger">Löschen</Button>
               </div>
