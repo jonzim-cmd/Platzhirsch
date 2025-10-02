@@ -1,5 +1,6 @@
 "use client"
 import { useEffect } from 'react'
+import { Z } from '@/components/ui/zIndex'
 import { createPortal } from 'react-dom'
 
 export function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
@@ -12,9 +13,9 @@ export function Modal({ children, onClose }: { children: React.ReactNode; onClos
   }, [onClose])
 
   const content = (
-    <div aria-modal="true" role="dialog" className="fixed inset-0 z-[1000]">
+    <div aria-modal="true" role="dialog" className="fixed inset-0" style={{ zIndex: Z.modal }}>
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="absolute inset-0 grid place-items-center p-4">
+      <div className="absolute inset-0 flex items-center justify-center p-4 overflow-auto">
         {children}
       </div>
     </div>
@@ -22,4 +23,3 @@ export function Modal({ children, onClose }: { children: React.ReactNode; onClos
   if (typeof document === 'undefined') return null
   return createPortal(content, document.body)
 }
-

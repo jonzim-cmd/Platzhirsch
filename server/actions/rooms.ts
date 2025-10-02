@@ -7,7 +7,12 @@ import { RoomType } from '@prisma/client'
 export async function listRooms() {
   const actor = currentActor()
   if (!checkPolicy(actor, 'read', 'room')) throw new Error('forbidden')
-  return prisma.room.findMany({ orderBy: { name: 'asc' } })
+  try {
+    return await prisma.room.findMany({ orderBy: { name: 'asc' } })
+  } catch (err) {
+    console.warn('listRooms fallback due to DB error:', err)
+    return []
+  }
 }
 
 export async function createRoom(name: string, type: 'normal' | 'adHoc' = 'normal') {
@@ -24,4 +29,3 @@ export async function deleteRoom(id: string) {
   await prisma.room.delete({ where: { id } })
   revalidatePath('/rooms')
 }
-

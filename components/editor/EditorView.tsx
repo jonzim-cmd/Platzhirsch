@@ -45,6 +45,11 @@ export function EditorView({ ctx }: { ctx: any }) {
                 const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
                 const x = e.clientX - rect.left
                 const y = e.clientY - rect.top
+                // First, try to create a joint if clicking on the edge between two boxes
+                if (typeof ctx.tryCreateJointAt === 'function') {
+                  const created = ctx.tryCreateJointAt(x, y)
+                  if (created) return
+                }
                 ctx.setMarquee({ active: true, x0: x, y0: y, x1: x, y1: y })
                 setSelectedIds([])
                 const onMove = (ev: MouseEvent) => {
@@ -55,7 +60,26 @@ export function EditorView({ ctx }: { ctx: any }) {
                   const miny = Math.min(y, ny)
                   const maxx = Math.max(x, nx)
                   const maxy = Math.max(y, ny)
-                  const sel = elements.filter((el: any) => el.x >= minx && el.y >= miny && (el.x + el.w) <= maxx && (el.y + el.h) <= maxy).map((el: any) => el.id!)
+                  const rectsIntersect = (aL: number, aT: number, aR: number, aB: number, bL: number, bT: number, bR: number, bB: number) => !(aR < bL || aL > bR || aB < bT || aT > bB)
+                  const sel = elements.filter((el: any) => {
+                    const rot = (((el.rotation || 0) % 360) + 360) % 360
+                    const rad = rot * Math.PI / 180
+                    const cos = Math.cos(rad)
+                    const sin = Math.sin(rad)
+                    const bbW = Math.abs(el.w * cos) + Math.abs(el.h * sin)
+                    const bbH = Math.abs(el.w * sin) + Math.abs(el.h * cos)
+                    const cx = el.x + el.w / 2
+                    const cy = el.y + el.h / 2
+                    const left = cx - bbW / 2
+                    const top = cy - bbH / 2
+                    const right = cx + bbW / 2
+                    const bottom = cy + bbH / 2
+                    const lineLike = el.type === 'DOOR' || el.type === 'WINDOW_SIDE' || el.type === 'WALL_SIDE'
+                    // For line-like elements, select on intersection to make thin bars easier to grab
+                    if (lineLike) return rectsIntersect(left, top, right, bottom, minx, miny, maxx, maxy)
+                    // For other elements, require full containment
+                    return left >= minx && top >= miny && right <= maxx && bottom <= maxy
+                  }).map((el: any) => el.id!)
                   setSelectedIds(sel)
                 }
                 const onUp = (ev: MouseEvent) => {
@@ -69,11 +93,29 @@ export function EditorView({ ctx }: { ctx: any }) {
                 window.addEventListener('mouseup', onUp)
               }
             }}
+            onMouseMove={(e) => {
+              if (readOnly) return
+              if (!canvasRef.current) return
+              const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+              const x = e.clientX - rect.left
+              const y = e.clientY - rect.top
+              ctx.updateJointHover?.(x, y)
+            }}
+            onMouseLeave={() => { if (!readOnly) ctx.setJointHover?.(null) }}
           >
             {(viewMode==='owner' ? elements : (leadPlan?.elements || [])).map((el: any) => (
               <div
                 key={el.id}
                 role="button"
+                onMouseDown={(ev) => {
+                  if (readOnly) return
+                  const id = el.id!
+                  // Wenn Element bereits in der Auswahl ist: als primär markieren,
+                  // damit Drag von jedem ausgewählten Element die ganze Gruppe bewegt.
+                  if (selectedIds.includes(id)) {
+                    setSelectedIds((prev: any) => [id, ...prev.filter((x: any) => x !== id)])
+                  }
+                }}
                 onClick={(ev) => {
                   if (readOnly) return
                   if (ev.metaKey || ev.ctrlKey) {
@@ -88,7 +130,13 @@ export function EditorView({ ctx }: { ctx: any }) {
                 ref={(node) => { if (node) elementRefs.current.set(el.id!, node); else elementRefs.current.delete(el.id!) }}
               >
                 <div
-                  className="h-full w-full rounded border border-neutral-700 bg-neutral-800/60 flex items-center justify-center px-1"
+                  className={`h-full w-full ${el.type === 'TEACHER_DESK' ? 'rounded-xl' : 'rounded'} border ${
+                    el.type === 'WINDOW_SIDE'
+                      ? 'border-sky-700 bg-sky-900/30 border-dashed'
+                      : el.type === 'WALL_SIDE'
+                        ? 'border-neutral-600 bg-neutral-700/60'
+                        : 'border-neutral-700 bg-neutral-800/60'
+                  } flex items-center justify-center px-1`}
                   style={{ fontSize: (el.meta?.fontSize ?? 20) + 'px' }}
                   onDoubleClick={(ev) => {
                     if (readOnly) return
@@ -146,7 +194,7 @@ export function EditorView({ ctx }: { ctx: any }) {
                     />
                   ) : (
                     <span className="truncate w-full text-center">
-                      {el.type === 'STUDENT' ? (el.refId ? (studentById.get(String(el.refId)) || 'Schüler') : (el.meta?.label || 'Schüler (leer)')) : ((el.meta?.label as string) || defaultTerms[el.type])}
+                      {el.type === 'STUDENT' ? (el.refId ? (studentById.get(String(el.refId)) || 'Schüler') : (el.meta?.label || 'leer')) : ((el.meta?.label as string) || defaultTerms[el.type])}
                     </span>
                   )}
                 </div>
@@ -217,7 +265,7 @@ export function EditorView({ ctx }: { ctx: any }) {
                 onRotateEnd={() => scheduleSave()}
               />
             )}
-            <JointOverlay elements={elements} readOnly={readOnly} onDetach={(a: string, b: string) => { removeJoint(a, b); scheduleSave() }} />
+            <JointOverlay elements={elements} readOnly={readOnly} hoverCandidate={ctx.jointHover} onCreate={(c:any)=>ctx.createJointFromCandidate?.(c)} onDetach={(a: string, b: string) => { removeJoint(a, b); scheduleSave() }} />
           </div>
         </div>
       </div>
@@ -250,8 +298,8 @@ export function EditorView({ ctx }: { ctx: any }) {
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => addElement('TEACHER_DESK')}>Lehrerpult</Button>
             <Button onClick={() => addElement('DOOR')}>Tür</Button>
-            <Button onClick={() => addElement('WINDOW_SIDE')}>Fensterseite</Button>
-            <Button onClick={() => addElement('WALL_SIDE')}>Wandseite</Button>
+            <Button onClick={() => addElement('WINDOW_SIDE')}>Fenster</Button>
+            <Button onClick={() => addElement('WALL_SIDE')}>Wand</Button>
             <Button onClick={applyPairsLayout} variant="primary">Paare-Layout anwenden</Button>
           </div>
         </div>

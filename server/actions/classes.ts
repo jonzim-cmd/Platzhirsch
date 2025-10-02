@@ -6,7 +6,12 @@ import { revalidatePath } from 'next/cache'
 export async function listClasses() {
   const actor = currentActor()
   if (!checkPolicy(actor, 'read', 'class')) throw new Error('forbidden')
-  return prisma.class.findMany({ orderBy: { name: 'asc' }, include: { leadProfile: true } })
+  try {
+    return await prisma.class.findMany({ orderBy: { name: 'asc' }, include: { leadProfile: true } })
+  } catch (err) {
+    console.warn('listClasses fallback due to DB error:', err)
+    return []
+  }
 }
 
 export async function createClass(name: string, leadProfileId?: string) {
@@ -30,4 +35,3 @@ export async function deleteClass(id: string) {
   await prisma.class.delete({ where: { id } })
   revalidatePath('/classes')
 }
-

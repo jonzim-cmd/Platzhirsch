@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { ImportStudents } from '@/components/import/ImportStudents'
 
 type Profile = { id: string; name: string } | null
 type ClassRow = { id: string; name: string; assigned: boolean; leadProfileId: string | null }
@@ -11,19 +12,64 @@ export function ProfileSettingsModal({ createMode, profile, onClose }: { createM
   const [name, setName] = useState(profile?.name || '')
   const [rows, setRows] = useState<ClassRow[]>([])
   const [loading, setLoading] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const [changed, setChanged] = useState(false)
+
+  function fetchWithTimeout(resource: RequestInfo | URL, options: RequestInit & { timeoutMs?: number } = {}) {
+    const { timeoutMs = 10000, ...rest } = options
+    const controller = new AbortController()
+    const id = setTimeout(() => controller.abort(), timeoutMs)
+    return fetch(resource, { ...rest, signal: controller.signal }).finally(() => clearTimeout(id))
+  }
+
+  async function fetchJsonSafe<T = any>(res: Response): Promise<T> {
+    const text = await res.text()
+    if (!text) {
+      // empty body: return undefined to let caller decide
+      return undefined as unknown as T
+    }
+    try {
+      return JSON.parse(text) as T
+    } catch {
+      throw new Error('Ungültige Server-Antwort')
+    }
+  }
 
   useEffect(() => {
     let pid = profile?.id
     if (!createMode && pid) {
-      fetch(`/api/profile-classes?profileId=${pid}`).then(r=>r.json()).then(setRows)
+      fetchWithTimeout(`/api/profile-classes?profileId=${pid}`)
+        .then(async (r) => {
+          if (!r.ok) {
+            const msg = await r.text()
+            throw new Error(msg || 'Fehler beim Laden der Klassen')
+          }
+          const data = await fetchJsonSafe<any[]>(r)
+          return Array.isArray(data) ? data : []
+        })
+        .then(setRows)
+        .catch(async () => {
+          // Fallback: hole alle Klassen ohne Zuordnung
+          const all = await fetchWithTimeout('/api/classes').then(async (r) => {
+            if (!r.ok) return [] as any[]
+            const data = await fetchJsonSafe<any[]>(r)
+            return Array.isArray(data) ? data : []
+          })
+          setRows(all.map((c:any)=>({ id:c.id, name:c.name, assigned:false, leadProfileId: c.leadProfileId ?? null })))
+        })
     } else {
       // pre-load classes list to select for new profile
-      fetch(`/api/profile-classes?profileId=__none__`).then(r=>r.json()).then((data)=>{
+      fetchWithTimeout(`/api/profile-classes?profileId=__none__`).then(async (r)=>{
+        if (!r.ok) throw new Error('failed')
+        const data = await fetchJsonSafe<any[]>(r)
         // If backend returns error, fallback to /api/classes
         if (Array.isArray(data)) setRows(data.map((d:any)=>({ ...d, assigned: false, leadProfileId: d.leadProfileId ?? null })))
       }).catch(async () => {
-        const all = await fetch('/api/classes').then(r=>r.json())
+        const all = await fetchWithTimeout('/api/classes').then(async (r)=>{
+          if (!r.ok) return [] as any[]
+          const data = await fetchJsonSafe<any[]>(r)
+          return Array.isArray(data) ? data : []
+        })
         setRows(all.map((c:any)=>({ id:c.id, name:c.name, assigned:false, leadProfileId: c.leadProfileId ?? null })))
       })
     }
@@ -67,7 +113,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose }: { createM
 
   return (
     <Modal onClose={()=>onClose(false)}>
-      <div className="w-[min(90vw,800px)] rounded border border-neutral-800 bg-bg-soft p-4 shadow-xl">
+      <div className="w-[min(90vw,800px)] max-h-[85vh] overflow-auto rounded border border-neutral-800 bg-bg-soft p-4 shadow-xl">
         <div className="flex items-center justify-between">
           <div className="text-lg font-medium">{createMode ? 'Profil anlegen' : 'Profil bearbeiten'}</div>
           <button className="text-fg-muted hover:text-fg" onClick={() => onClose(!!changed)}>✕</button>
@@ -103,6 +149,17 @@ export function ProfileSettingsModal({ createMode, profile, onClose }: { createM
                 </tbody>
               </table>
             </div>
+          </div>
+          <div className="rounded border border-neutral-900 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-medium">Schüler importieren (XLSX/CSV)</div>
+              <Button onClick={()=>setImportOpen(v=>!v)}>{importOpen ? 'Schließen' : 'Öffnen'}</Button>
+            </div>
+            {importOpen && (
+              <div className="mt-2">
+                <ImportStudents />
+              </div>
+            )}
           </div>
           <div className="flex justify-between gap-2">
             {!createMode && profile?.id && (

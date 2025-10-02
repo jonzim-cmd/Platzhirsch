@@ -106,9 +106,11 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   const [classId, setClassId] = useState('')
   const [roomId, setRoomId] = useState('')
   const [plan, setPlan] = useState<Plan | null>(null)
+  const planRef = useRef<Plan | null>(null)
   const [leadPlan, setLeadPlan] = useState<Plan | null>(null)
   const [viewMode, setViewMode] = useState<'owner' | 'lead'>('owner')
   const [elements, setElements] = useState<Element[]>([])
+  const elementsRef = useRef<Element[]>([])
   const [students, setStudents] = useState<{ id: string; foreName: string }[]>([])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle')
@@ -130,6 +132,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   const detachOnDragRef = useRef(false)
   const dragStartPositions = useRef<Map<string, { x: number; y: number }>>(new Map())
   const dragTriedSwap = useRef(false)
+  const [jointHover, setJointHover] = useState<null | { aId: string; bId: string; aSide: Side; bSide: Side; aT: number; bT: number }>(null)
   // removed drag-preview state (caused duplication perception)
   // no modal/state needed for simplified quick layout
 
@@ -143,7 +146,10 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     const betweenPairsX = 24 // small aisle between pairs
     const betweenRowsY = 24
 
-    const n = students.length
+    // Determine how many seats to layout: prefer loaded students count, fallback to existing seat count
+    const existingSeats = elements.filter(e => e.type === 'STUDENT')
+    const nStudents = students.length
+    const n = Math.max(nStudents, existingSeats.length)
     if (n === 0) return
 
     const pairWidth = seatW * 2 // tight: no gap inside pair
@@ -174,7 +180,12 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     }
 
     // assign all students sequentially (use all)
-    const assignedSeats = newSeats.map((e, i) => i < n ? { ...e, refId: students[i].id } : e)
+    // Assign refIds: first loaded students, then preserve any existing refIds if present
+    const assignedSeats = newSeats.map((e, i) => {
+      if (i < nStudents) return { ...e, refId: students[i].id }
+      if (i < existingSeats.length) return { ...e, refId: existingSeats[i].refId ?? null }
+      return e
+    })
 
     // replace existing student elements; keep others
     setElements(prev => {
@@ -242,9 +253,17 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   const defaultTerms: Record<Exclude<ElementType, 'STUDENT'>, string> = {
     TEACHER_DESK: 'Lehrerpult',
     DOOR: 'Tür',
-    WINDOW_SIDE: 'Fensterseite',
-    WALL_SIDE: 'Wandseite',
+    WINDOW_SIDE: 'Fenster',
+    WALL_SIDE: 'Wand',
   }
+
+  useEffect(() => {
+    planRef.current = plan
+  }, [plan])
+
+  useEffect(() => {
+    elementsRef.current = elements
+  }, [elements])
 
   useEffect(() => {
     const read = () => {
@@ -374,23 +393,24 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   }, [activeProfile?.id, classId, roomId, loadPlan])
 
   const scheduleSave = useCallback(() => {
-    if (!plan) return
+    if (!planRef.current) return
     if (saveTimer.current) clearTimeout(saveTimer.current)
     setSaving('saving')
     saveTimer.current = setTimeout(async () => {
       try {
-        await fetch('/api/plan', {
+        const res = await fetch('/api/plan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ planId: plan.id, elements }),
+          body: JSON.stringify({ planId: planRef.current!.id, elements: elementsRef.current }),
         })
+        if (!res.ok) throw new Error('save failed')
         setSaving('saved')
         setTimeout(() => setSaving('idle'), 1200)
       } catch {
         setSaving('idle')
       }
     }, 900)
-  }, [plan, elements])
+  }, [])
 
   const primarySelectedId = selectedIds[0] ?? null
   const selected = useMemo(() => (primarySelectedId ? elements.find(e => e.id === primarySelectedId) : undefined), [elements, primarySelectedId])
@@ -497,22 +517,45 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       }
     }
 
-    // 2) Swap nur für STUDENT↔STUDENT (RefId-Tausch)
+    // Für Fenster/Wand: keine weitere automatische Ausrichtung/Snapping, um ungewollte Sprünge zu vermeiden
+    if (srcEl && (srcEl.type === 'WINDOW_SIDE' || srcEl.type === 'WALL_SIDE')) {
+      scheduleSave()
+      return
+    }
+
+    // 2) Swap für STUDENT↔STUDENT (RefId-Tausch) – unterstützt 1↔1, 2↔2 (Paare) und N↔N (Gruppen)
     if (srcEl && srcEl.type === 'STUDENT') {
       // determine source unit (single or pair)
       const getStudentPairPartner = (el: Element): { partner: Element, side: Side, pairId?: string } | null => {
+        // 1) Prefer explicit 'pair' joint if present
         const joints: any[] = Array.isArray(el.meta?.joints) ? el.meta!.joints : []
         const pj = joints.find((j: any) => (j.kind === 'pair') && typeof j.otherId === 'string')
-        if (!pj) return null
-        const other = elements.find(x => x.id === pj.otherId) || null
-        if (other && other.type === 'STUDENT') return { partner: other, side: pj.side as Side, pairId: pj.pairId }
+        if (pj) {
+          const other = elements.find(x => x.id === pj.otherId) || null
+          if (other && other.type === 'STUDENT') return { partner: other, side: pj.side as Side, pairId: pj.pairId }
+        }
+        // 2) Fallback: infer pair by geometry (touching opposite edges to another STUDENT)
+        let best: { partner: Element, side: Side, score: number } | null = null
+        for (const b of elements) {
+          if (b.id === el.id) continue
+          if (b.type !== 'STUDENT') continue
+          const jr = computeEdgeJointRect({ x: el.x, y: el.y, w: el.w, h: el.h }, { x: b.x, y: b.y, w: b.w, h: b.h })
+          if (!jr) continue
+          // score by overlap along contact axis
+          const vOverlap = Math.max(0, Math.min(el.y + el.h, b.y + b.h) - Math.max(el.y, b.y))
+          const hOverlap = Math.max(0, Math.min(el.x + el.w, b.x + b.w) - Math.max(el.x, b.x))
+          const score = Math.max(vOverlap, hOverlap)
+          if (!best || score > best.score) best = { partner: b, side: jr.aSide as Side, score }
+        }
+        if (best) return { partner: best.partner, side: best.side }
         return null
       }
       const pInfo = getStudentPairPartner(srcEl)
       const partner = pInfo?.partner ?? null
       const sourceUnitIds = partner ? [srcEl.id!, partner.id!] : [srcEl.id!]
-      // gesamte Quellgruppe sammeln, um Zielkandidaten auszuschließen und später zurückzusetzen
+      // gesamte Quellgruppe sammeln (für Kandidatenfilter, Rücksetzen Geometrie und N↔N‑Tausch)
       const sourceGroupIds = getGroupIds([srcEl.id!])
+      const sourceGroupStudents = elements.filter(e => sourceGroupIds.includes(e.id!) && e.type === 'STUDENT').map(e => e.id!)
       // find target seat by >=50% Überdeckung, Kandidaten ohne Quellgruppe
       const candidates = elements.filter(e => e.type === 'STUDENT' && !sourceGroupIds.includes(e.id!))
       let targetSeat: Element | null = null
@@ -529,6 +572,88 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         if (ratio >= 0.5 && ratio > bestRatio) { bestRatio = ratio; targetSeat = e }
       }
       if (targetSeat) {
+        // Zielgruppe ermitteln (N↔N)
+        const targetGroupIds = getGroupIds([targetSeat.id!])
+        const targetGroupStudents = elements.filter(e => targetGroupIds.includes(e.id!) && e.type === 'STUDENT').map(e => e.id!)
+
+        const swapNtoN = (Aids: string[], Bids: string[]) => {
+          const sortByPos = (ids: string[]) => {
+            const list = ids.map(id => elements.find(e => e.id === id)!).filter(Boolean)
+            return list.sort((p, q) => (p.y - q.y) || (p.x - q.x)).map(e => e.id!)
+          }
+          const A = sortByPos(Aids)
+          const B = sortByPos(Bids)
+          if (A.length !== B.length) return false
+          const start = dragStartPositions.current
+          setElements(prev => {
+            const ref = new Map(prev.map(x => [x.id!, x.refId ?? null]))
+            return prev.map(e => {
+              let out = e
+              const ia = A.indexOf(e.id!)
+              const ib = B.indexOf(e.id!)
+              if (ia >= 0) out = { ...out, refId: ref.get(B[ia]) ?? null }
+              else if (ib >= 0) out = { ...out, refId: ref.get(A[ib]) ?? null }
+              if (start.size > 0 && start.has(e.id!)) out = { ...out, x: start.get(e.id!)!.x, y: start.get(e.id!)!.y }
+              return out
+            })
+          })
+          return true
+        }
+
+        // Wenn beide Gruppen gleich groß und > 1: N↔N‑Tausch
+        if (sourceGroupStudents.length > 1 && sourceGroupStudents.length === targetGroupStudents.length) {
+          const ok = swapNtoN(sourceGroupStudents, targetGroupStudents)
+          if (ok) { scheduleSave(); return }
+        }
+        // Bei ungleichen Gruppengrößen: nur überlappte Plätze tauschen (greedy nach größter Überdeckung)
+        if (sourceGroupStudents.length !== targetGroupStudents.length) {
+          const swapPairs = (pairs: Array<{ aId: string; bId: string }>) => {
+            const start = dragStartPositions.current
+            setElements(prev => {
+              const ref = new Map(prev.map(x => [x.id!, x.refId ?? null]))
+              const aMap = new Map(pairs.map(p => [p.aId, p.bId]))
+              const bMap = new Map(pairs.map(p => [p.bId, p.aId]))
+              return prev.map(e => {
+                let out = e
+                if (aMap.has(e.id!)) out = { ...out, refId: ref.get(aMap.get(e.id!)!) ?? null }
+                else if (bMap.has(e.id!)) out = { ...out, refId: ref.get(bMap.get(e.id!)!) ?? null }
+                if (start.size > 0 && start.has(e.id!)) out = { ...out, x: start.get(e.id!)!.x, y: start.get(e.id!)!.y }
+                return out
+              })
+            })
+          }
+          type Cand = { aId: string; bId: string; ratio: number }
+          const srcList = elements.filter(e => sourceGroupStudents.includes(e.id!))
+          const tgtList = elements.filter(e => targetGroupStudents.includes(e.id!))
+          const area = (x: Element) => x.w * x.h
+          const cands: Cand[] = []
+          for (const s of srcList) {
+            for (const t of tgtList) {
+              const left = Math.max(s.x, t.x)
+              const right = Math.min(s.x + s.w, t.x + t.w)
+              const top = Math.max(s.y, t.y)
+              const bottom = Math.min(s.y + s.h, t.y + t.h)
+              const a = Math.max(0, right - left) * Math.max(0, bottom - top)
+              const denom = Math.min(area(s), area(t))
+              const ratio = denom > 0 ? (a / denom) : 0
+              if (ratio >= 0.5) cands.push({ aId: s.id!, bId: t.id!, ratio })
+            }
+          }
+          cands.sort((p, q) => q.ratio - p.ratio)
+          const usedA = new Set<string>()
+          const usedB = new Set<string>()
+          const pairs: Array<{ aId: string; bId: string }> = []
+          for (const c of cands) {
+            if (usedA.has(c.aId) || usedB.has(c.bId)) continue
+            usedA.add(c.aId); usedB.add(c.bId)
+            pairs.push({ aId: c.aId, bId: c.bId })
+          }
+          if (pairs.length > 0) {
+            swapPairs(pairs)
+            scheduleSave()
+            return
+          }
+        }
         // identify target unit (pair or single) – but swap strategy: always ensure 1:1 or 2:2, fallback 1:1
         const targetInfo = getStudentPairPartner(targetSeat)
         const targetPartner = targetInfo?.partner ?? null
@@ -628,9 +753,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         }
       }
       const movers = Array.from(groupIds)
-      // For each mover: collect all touching externals, align to best, add joints for all touches
-      type PendingJoint = { aId: string; bId: string; aSide: Side; bSide: Side; aT: number; bT: number }
-      const pendingJoints: PendingJoint[] = []
+      // For each mover: collect all touching externals and align to best contact
       const alignedPos = new Map<string, { x: number; y: number }>()
       for (const mid of movers) {
         const me0 = (mid === id) ? snappedCurrent : byId.get(mid)
@@ -645,7 +768,6 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
           // compute joint for side info and alignment
           const jr = computeEdgeJointRect({ x: me.x, y: me.y, w: me.w, h: me.h }, { x: other.x, y: other.y, w: other.w, h: other.h })
           if (!jr) continue
-          pendingJoints.push({ aId: mid, bId: other.id!, aSide: jr.aSide, bSide: jr.bSide, aT: jr.aT, bT: jr.bT })
           // score by overlap along contact axis
           const vOverlap = Math.max(0, Math.min(me.y + me.h, other.y + other.h) - Math.max(me.y, other.y))
           const hOverlap = Math.max(0, Math.min(me.x + me.w, other.x + other.w) - Math.max(me.x, other.x))
@@ -686,32 +808,159 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         }
         return e
       })
-      // add all pending joints async
-      setTimeout(() => {
-        for (const j of pendingJoints) addJoint(j.aId, j.bId, j.aSide, j.bSide, j.aT, j.bT)
-        // remove joints that no longer touch, for movers
-        for (const mid of movers) {
-          const now = next.find(x => x.id === mid)
-          if (!now) continue
-          for (const other of next) {
-            if (other.id === mid) continue
-            if (!touchesOrIntersects(now, other)) removeJoint(mid, other.id!)
-          }
-        }
-        scheduleSave()
-      }, 0)
+      // No automatic joint creation or removal here; only alignment for nicer feel
       return next
     })
     
     scheduleSave()
   }
 
+  // Try to create a joint by clicking the shared edge between two boxes
+  const findJointCandidate = (x: number, y: number, tol = 12): null | { aId: string; bId: string; aSide: Side; bSide: Side; aT: number; bT: number } => {
+    if (readOnly) return false
+    type Hit = { aId: string; bId: string; aSide: Side; bSide: Side; aT: number; bT: number; dist: number }
+    let best: Hit | null = null
+    const N = elements.length
+    for (let i = 0; i < N; i++) {
+      const a = elements[i]
+      for (let j = i + 1; j < N; j++) {
+        const b = elements[j]
+        // Horizontal adjacency (vertical edge between a.right and b.left)
+        const vOverlapTop = Math.max(a.y, b.y)
+        const vOverlapBottom = Math.min(a.y + a.h, b.y + b.h)
+        const vOverlap = Math.max(0, vOverlapBottom - vOverlapTop)
+        if (vOverlap > 0) {
+          const aRight = a.x + a.w
+          const bLeft = b.x
+          const bRight = b.x + b.w
+          const aLeft = a.x
+          // a.right ~ b.left
+          if (Math.abs(aRight - bLeft) <= tol) {
+            const edgeX = (aRight + bLeft) / 2
+            const withinY = y >= (vOverlapTop - tol) && y <= (vOverlapBottom + tol)
+            const dist = Math.abs(x - edgeX)
+            if (withinY && dist <= tol) {
+              const aT = (Math.min(Math.max(y, a.y), a.y + a.h) - a.y) / a.h
+              const bT = (Math.min(Math.max(y, b.y), b.y + b.h) - b.y) / b.h
+              const hit: Hit = { aId: a.id!, bId: b.id!, aSide: 'right', bSide: 'left', aT, bT, dist }
+              if (!best || dist < best.dist) best = hit
+            }
+          }
+          // b.right ~ a.left
+          if (Math.abs(bRight - aLeft) <= tol) {
+            const edgeX = (bRight + aLeft) / 2
+            const withinY = y >= (vOverlapTop - tol) && y <= (vOverlapBottom + tol)
+            const dist = Math.abs(x - edgeX)
+            if (withinY && dist <= tol) {
+              const aT = (Math.min(Math.max(y, a.y), a.y + a.h) - a.y) / a.h
+              const bT = (Math.min(Math.max(y, b.y), b.y + b.h) - b.y) / b.h
+              const hit: Hit = { aId: a.id!, bId: b.id!, aSide: 'left', bSide: 'right', aT, bT, dist }
+              if (!best || dist < best.dist) best = hit
+            }
+          }
+        }
+        // Vertical adjacency (horizontal edge between a.bottom and b.top)
+        const hOverlapLeft = Math.max(a.x, b.x)
+        const hOverlapRight = Math.min(a.x + a.w, b.x + b.w)
+        const hOverlap = Math.max(0, hOverlapRight - hOverlapLeft)
+        if (hOverlap > 0) {
+          const aBottom = a.y + a.h
+          const bTop = b.y
+          const bBottom = b.y + b.h
+          const aTop = a.y
+          // a.bottom ~ b.top
+          if (Math.abs(aBottom - bTop) <= tol) {
+            const edgeY = (aBottom + bTop) / 2
+            const withinX = x >= (hOverlapLeft - tol) && x <= (hOverlapRight + tol)
+            const dist = Math.abs(y - edgeY)
+            if (withinX && dist <= tol) {
+              const aT = (Math.min(Math.max(x, a.x), a.x + a.w) - a.x) / a.w
+              const bT = (Math.min(Math.max(x, b.x), b.x + b.w) - b.x) / b.w
+              const hit: Hit = { aId: a.id!, bId: b.id!, aSide: 'bottom', bSide: 'top', aT, bT, dist }
+              if (!best || dist < best.dist) best = hit
+            }
+          }
+          // b.bottom ~ a.top
+          if (Math.abs(bBottom - aTop) <= tol) {
+            const edgeY = (bBottom + aTop) / 2
+            const withinX = x >= (hOverlapLeft - tol) && x <= (hOverlapRight + tol)
+            const dist = Math.abs(y - edgeY)
+            if (withinX && dist <= tol) {
+              const aT = (Math.min(Math.max(x, a.x), a.x + a.w) - a.x) / a.w
+              const bT = (Math.min(Math.max(x, b.x), b.x + b.w) - b.x) / b.w
+              const hit: Hit = { aId: a.id!, bId: b.id!, aSide: 'top', bSide: 'bottom', aT, bT, dist }
+              if (!best || dist < best.dist) best = hit
+            }
+          }
+        }
+      }
+    }
+    if (!best) return null
+    return { aId: best.aId, bId: best.bId, aSide: best.aSide, bSide: best.bSide, aT: best.aT, bT: best.bT }
+  }
+
+  const updateJointHover = (x: number, y: number): boolean => {
+    const c = findJointCandidate(x, y)
+    setJointHover(c)
+    return !!c
+  }
+
+  const createJointFromCandidate = (c: { aId: string; bId: string; aSide: Side; bSide: Side; aT: number; bT: number }) => {
+    addJoint(c.aId, c.bId, c.aSide, c.bSide, c.aT, c.bT)
+    setJointHover(null)
+    scheduleSave()
+  }
+
+  const tryCreateJointAt = (x: number, y: number): boolean => {
+    const c = findJointCandidate(x, y)
+    if (!c) return false
+    createJointFromCandidate(c)
+    return true
+  }
+
   const addElement = (type: ElementType, refId?: string, at?: { x: number; y: number }) => {
     if (readOnly) return
     const startX = sidebarOpen ? 320 : 120
     // Larger default sizes to match bigger default font
-    const base: Element = { id: uid('el'), type, refId: refId ?? null, x: at?.x ?? startX, y: at?.y ?? 120, w: 120, h: 70, rotation: 0, z: elements.length, groupId: null, meta: { fontSize: typeStyles[type]?.fontSize ?? 20 } }
-    if (type === 'WINDOW_SIDE' || type === 'WALL_SIDE') { base.w = 320; base.h = 10 }
+    const baseFont = typeStyles[type]?.fontSize ?? 20
+    const base: Element = { id: uid('el'), type, refId: refId ?? null, x: at?.x ?? startX, y: at?.y ?? 120, w: 120, h: 70, rotation: 0, z: elements.length, groupId: null, meta: { fontSize: baseFont } }
+    if (type === 'WINDOW_SIDE' || type === 'WALL_SIDE') {
+      // Vertical bar: rotate 90°, thickness = h, length = w
+      const margin = 12
+      const gapToStudents = 12
+      // ensure enough thickness for rotated label
+      base.h = Math.max(24, baseFont + 8)
+      // determine student bounding box if available
+      const studs = elements.filter(e => e.type === 'STUDENT')
+      const minX = studs.length ? Math.min(...studs.map(s => s.x)) : null
+      const maxR = studs.length ? Math.max(...studs.map(s => s.x + s.w)) : null
+      const minY = studs.length ? Math.min(...studs.map(s => s.y)) : null
+      const maxB = studs.length ? Math.max(...studs.map(s => s.y + s.h)) : null
+
+      // set a sensible length: span of students or default
+      const studentsSpan = (minY !== null && maxB !== null) ? Math.max(160, (maxB - minY) + 2 * gapToStudents) : 320
+      base.w = Math.min(Math.max(160, studentsSpan), Math.max(160, frameSize.h - 2 * margin))
+      base.rotation = 90
+
+      // Compute center coordinates to place next to students and close to screen edge
+      const thickness = base.h
+      const centerY = (minY !== null && maxB !== null) ? (minY + maxB) / 2 : (frameSize.h / 2)
+      if (type === 'WINDOW_SIDE') {
+        // right side: near outer right edge, but not beyond, and at least next to last student
+        const edgeCenterX = frameSize.w - margin - (thickness / 2)
+        const nextToStudentsCenterX = (maxR !== null) ? (maxR + gapToStudents + (thickness / 2)) : edgeCenterX
+        const centerX = Math.min(edgeCenterX, nextToStudentsCenterX)
+        base.x = Math.max(0, centerX - base.w / 2)
+        base.y = Math.max(0, Math.min(frameSize.h - base.h, centerY - base.h / 2))
+      } else {
+        // left side: near outer left edge, but not beyond, and with gap to leftmost students
+        const edgeCenterX = margin + (thickness / 2)
+        const nextToStudentsCenterX = (minX !== null) ? (minX - gapToStudents - (thickness / 2)) : edgeCenterX
+        const centerX = Math.max(edgeCenterX, nextToStudentsCenterX)
+        base.x = Math.max(0, Math.min(frameSize.w - base.w, centerX - base.w / 2))
+        base.y = Math.max(0, Math.min(frameSize.h - base.h, centerY - base.h / 2))
+      }
+    }
     if (type === 'DOOR') { base.w = 48; base.h = 10 }
     if (type === 'TEACHER_DESK') { base.w = 260; base.h = 80 }
     setElements(prev => [...prev, base])
@@ -854,6 +1103,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     moveElementBy, onDragEnd, setElements, students, classId, roomId, loadPlan,
     setMarquee, marquee, editing, setEditing, detachOnDragRef, dragStartPositions,
     sidebarOpen, activeProfile, setTypeStyles, removeSelected, setStudents,
+    tryCreateJointAt, updateJointHover, jointHover, setJointHover, createJointFromCandidate,
     onInlineEditKeyDown: async (el: any, e: any) => {
       if (e.key === 'Escape') { setEditing({ id: null, value: '' }); return }
       if (e.key === 'Enter') {
