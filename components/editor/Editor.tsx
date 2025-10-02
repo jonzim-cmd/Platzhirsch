@@ -599,63 +599,97 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         }, 0)
         return prev
       }
-      // Snap when near another element
-      const others = prev.filter(e => e.id !== id)
-      const delta = snapDeltaToNearest(current, others, 8)
+      // Snap current when near another element for nicer feel
+      const othersForSnap = prev.filter(e => e.id !== id)
+      const delta = snapDeltaToNearest(current, othersForSnap, 8)
       let snappedCurrent = current
       if (delta) {
         snappedCurrent = { ...current, x: current.x + delta.dx, y: current.y + delta.dy }
       }
-      // Determine best other for linking by maximum overlap along contact axis
-      let bestOther: Element | null = null
-      let bestScore = -Infinity
-      for (const other of prev) {
-        if (other.id === id) continue
-        if (!touchesOrIntersects(snappedCurrent, other)) continue
-        // score by overlap length
-        const vOverlap = Math.max(0, Math.min(snappedCurrent.y + snappedCurrent.h, other.y + other.h) - Math.max(snappedCurrent.y, other.y))
-        const hOverlap = Math.max(0, Math.min(snappedCurrent.x + snappedCurrent.w, other.x + other.w) - Math.max(snappedCurrent.x, other.x))
-        const score = Math.max(vOverlap, hOverlap)
-        if (score > bestScore) { bestScore = score; bestOther = other }
+      // Build group of moved elements (connected component)
+      const byId = new Map(prev.map(e => [e.id!, e]))
+      const groupVisit: string[] = [id]
+      const groupIds = new Set<string>()
+      while (groupVisit.length) {
+        const cur = groupVisit.pop()!
+        if (groupIds.has(cur)) continue
+        groupIds.add(cur)
+        const node = byId.get(cur)
+        const links = Array.isArray(node?.meta?.joints) ? node!.meta!.joints as any[] : []
+        for (const l of links) if (!groupIds.has(l.otherId)) groupVisit.push(l.otherId)
       }
-      if (bestOther) {
-        // compute perfect alignment (nahtlos, ohne Überlappung) anhand Joint-Geometrie
-        const joint = computeEdgeJointRect({ x: snappedCurrent.x, y: snappedCurrent.y, w: snappedCurrent.w, h: snappedCurrent.h }, { x: bestOther.x, y: bestOther.y, w: bestOther.w, h: bestOther.h })
-        let aligned = { ...snappedCurrent }
-        if (joint) {
-          const a = aligned, b = bestOther
-          if (joint.aSide === 'right' && joint.bSide === 'left') {
-            aligned.x = b.x - a.w
-            aligned.y = b.y + joint.bT * b.h - joint.aT * a.h
-          } else if (joint.aSide === 'left' && joint.bSide === 'right') {
-            aligned.x = b.x + b.w
-            aligned.y = b.y + joint.bT * b.h - joint.aT * a.h
-          } else if (joint.aSide === 'bottom' && joint.bSide === 'top') {
-            aligned.y = b.y - a.h
-            aligned.x = b.x + joint.bT * b.w - joint.aT * a.w
-          } else if (joint.aSide === 'top' && joint.bSide === 'bottom') {
-            aligned.y = b.y + b.h
-            aligned.x = b.x + joint.bT * b.w - joint.aT * a.w
+      const movers = Array.from(groupIds)
+      // For each mover: collect all touching externals, align to best, add joints for all touches
+      type PendingJoint = { aId: string; bId: string; aSide: Side; bSide: Side; aT: number; bT: number }
+      const pendingJoints: PendingJoint[] = []
+      const alignedPos = new Map<string, { x: number; y: number }>()
+      for (const mid of movers) {
+        const me0 = (mid === id) ? snappedCurrent : byId.get(mid)!
+        let me = me0
+        // find all externals that touch
+        let bestOther: Element | null = null
+        let bestScore = -Infinity
+        for (const other of prev) {
+          if (groupIds.has(other.id!)) continue
+          if (!touchesOrIntersects(me, other)) continue
+          // compute joint for side info and alignment
+          const jr = computeEdgeJointRect({ x: me.x, y: me.y, w: me.w, h: me.h }, { x: other.x, y: other.y, w: other.w, h: other.h })
+          if (!jr) continue
+          pendingJoints.push({ aId: mid, bId: other.id!, aSide: jr.aSide, bSide: jr.bSide, aT: jr.aT, bT: jr.bT })
+          // score by overlap along contact axis
+          const vOverlap = Math.max(0, Math.min(me.y + me.h, other.y + other.h) - Math.max(me.y, other.y))
+          const hOverlap = Math.max(0, Math.min(me.x + me.w, other.x + other.w) - Math.max(me.x, other.x))
+          const score = Math.max(vOverlap, hOverlap)
+          if (score > bestScore) { bestScore = score; bestOther = other }
+        }
+        if (bestOther) {
+          const jr = computeEdgeJointRect({ x: me.x, y: me.y, w: me.w, h: me.h }, { x: bestOther.x, y: bestOther.y, w: bestOther.w, h: bestOther.h })
+          if (jr) {
+            const a = me, b = bestOther
+            let nx = a.x, ny = a.y
+            if (jr.aSide === 'right' && jr.bSide === 'left') {
+              nx = b.x - a.w
+              ny = b.y + jr.bT * b.h - jr.aT * a.h
+            } else if (jr.aSide === 'left' && jr.bSide === 'right') {
+              nx = b.x + b.w
+              ny = b.y + jr.bT * b.h - jr.aT * a.h
+            } else if (jr.aSide === 'bottom' && jr.bSide === 'top') {
+              ny = b.y - a.h
+              nx = b.x + jr.bT * b.w - jr.aT * a.w
+            } else if (jr.aSide === 'top' && jr.bSide === 'bottom') {
+              ny = b.y + b.h
+              nx = b.x + jr.bT * b.w - jr.aT * a.w
+            }
+            alignedPos.set(mid, { x: nx, y: ny })
           }
         }
-        const next = prev.map(e => e.id === id ? { ...aligned } : e)
-        // Apply/update joint
-        setTimeout(() => {
-          if (joint) addJoint(id, bestOther!.id!, joint.aSide, joint.bSide, joint.aT, joint.bT)
-          scheduleSave()
-        }, 0)
-        return next
       }
-      // Moved but no link: remove joints that no longer touch from this id
+      // apply aligned positions for movers
+      const next = prev.map(e => {
+        if (e.id === id) {
+          const p = alignedPos.get(id)
+          return p ? { ...snappedCurrent, x: p.x, y: p.y } : { ...snappedCurrent }
+        }
+        if (alignedPos.has(e.id!)) {
+          const p = alignedPos.get(e.id!)!
+          return { ...e, x: p.x, y: p.y }
+        }
+        return e
+      })
+      // add all pending joints async
       setTimeout(() => {
-        for (const other of prev) {
-          if (other.id === id) continue
-          // remove only if no longer touching after snap
-          if (!touchesOrIntersects(snappedCurrent, other)) removeJoint(id, other.id!)
+        for (const j of pendingJoints) addJoint(j.aId, j.bId, j.aSide, j.bSide, j.aT, j.bT)
+        // remove joints that no longer touch, for movers
+        for (const mid of movers) {
+          const now = next.find(x => x.id === mid)!
+          for (const other of next) {
+            if (other.id === mid) continue
+            if (!touchesOrIntersects(now, other)) removeJoint(mid, other.id!)
+          }
         }
         scheduleSave()
       }, 0)
-      return prev.map(e => e.id === id ? { ...snappedCurrent } : e)
+      return next
     })
     setDraggingGroupIds([])
     scheduleSave()
