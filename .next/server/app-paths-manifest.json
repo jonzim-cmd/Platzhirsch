@@ -1,22 +1,8 @@
 {
-  "/_not-found/page": "app/_not-found/page.js",
-  "/api/class/lead/route": "app/api/class/lead/route.js",
-  "/api/import/route": "app/api/import/route.js",
-  "/api/plan/copy/route": "app/api/plan/copy/route.js",
-  "/api/plan/route": "app/api/plan/route.js",
-  "/api/profile-classes/route": "app/api/profile-classes/route.js",
-  "/api/profiles/[id]/route": "app/api/profiles/[id]/route.js",
-  "/api/profiles/route": "app/api/profiles/route.js",
-  "/api/classes/route": "app/api/classes/route.js",
-  "/api/rooms/route": "app/api/rooms/route.js",
-  "/api/students/[id]/route": "app/api/students/[id]/route.js",
-  "/api/students/route": "app/api/students/route.js",
-  "/editor/page": "app/editor/page.js",
-  "/import/page": "app/import/page.js",
-  "/api/health/route": "app/api/health/route.js",
   "/page": "app/page.js",
-  "/classes/page": "app/classes/page.js",
-  "/profiles/page": "app/profiles/page.js",
-  "/rooms/page": "app/rooms/page.js",
-  "/students/page": "app/students/page.js"
+  "/api/profiles/route": "app/api/profiles/route.js",
+  "/api/import/route": "app/api/import/route.js",
+  "/api/profile-classes/route": "app/api/profile-classes/route.js",
+  "/api/rooms/route": "app/api/rooms/route.js",
+  "/api/classes/route": "app/api/classes/route.js"
 }
