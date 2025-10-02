@@ -129,6 +129,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   const detachOnDragRef = useRef(false)
   const dragStartPositions = useRef<Map<string, { x: number; y: number }>>(new Map())
   const dragTriedSwap = useRef(false)
+  const [draggingGroupIds, setDraggingGroupIds] = useState<string[]>([])
   // no modal/state needed for simplified quick layout
 
   const applyPairsLayout = () => {
@@ -467,11 +468,21 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       return { px, py }
     })()
 
-    // 1) Swap für WINDOW_SIDE <-> WALL_SIDE (Geometrie-Swap)
+    // 1) Swap für WINDOW_SIDE <-> WALL_SIDE (Geometrie-Swap) – nur bei >=50% Überdeckung
     if (srcEl && (srcEl.type === 'WINDOW_SIDE' || srcEl.type === 'WALL_SIDE')) {
-      const isPointIn = (e: Element, x: number, y: number) => x >= e.x && x <= e.x + e.w && y >= e.y && y <= e.y + e.h
       const candidates = elements.filter(e => e.id !== srcEl.id && (e.type === 'WINDOW_SIDE' || e.type === 'WALL_SIDE') && e.type !== srcEl.type)
-      const target = candidates.find(e => isPointIn(e, pointer.px, pointer.py)) || null
+      let target: Element | null = null
+      let bestRatio = 0
+      const srcArea = srcEl.w * srcEl.h
+      for (const e of candidates) {
+        const left = Math.max(srcEl.x, e.x)
+        const right = Math.min(srcEl.x + srcEl.w, e.x + e.w)
+        const top = Math.max(srcEl.y, e.y)
+        const bottom = Math.min(srcEl.y + srcEl.h, e.y + e.h)
+        const area = Math.max(0, right - left) * Math.max(0, bottom - top)
+        const ratio = srcArea > 0 && e.w * e.h > 0 ? (area / Math.min(srcArea, e.w * e.h)) : 0
+        if (ratio >= 0.5 && ratio > bestRatio) { bestRatio = ratio; target = e }
+      }
       if (target) {
         // swap geometry
         setElements(prev => prev.map(e => {
@@ -479,6 +490,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
           if (e.id === target.id) return { ...e, x: srcEl.x, y: srcEl.y, w: srcEl.w, h: srcEl.h, rotation: srcEl.rotation, z: srcEl.z }
           return e
         }))
+        setDraggingGroupIds([])
         scheduleSave()
         return
       }
@@ -500,23 +512,20 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       const sourceUnitIds = partner ? [srcEl.id!, partner.id!] : [srcEl.id!]
       // gesamte Quellgruppe sammeln, um Zielkandidaten auszuschließen und später zurückzusetzen
       const sourceGroupIds = getGroupIds([srcEl.id!])
-      // find target seat under pointer excluding source unit
-      const isPointIn = (e: Element, x: number, y: number) => x >= e.x && x <= e.x + e.w && y >= e.y && y <= e.y + e.h
+      // find target seat by >=50% Überdeckung, Kandidaten ohne Quellgruppe
       const candidates = elements.filter(e => e.type === 'STUDENT' && !sourceGroupIds.includes(e.id!))
-      let targetSeat = candidates.find(e => isPointIn(e, pointer.px, pointer.py)) || null
-      if (!targetSeat) {
-        // fallback by max overlap with src rect
-        const a = srcEl
-        let best: { e: Element; area: number } | null = null
-        for (const e of candidates) {
-          const left = Math.max(a.x, e.x)
-          const right = Math.min(a.x + a.w, e.x + e.w)
-          const top = Math.max(a.y, e.y)
-          const bottom = Math.min(a.y + a.h, e.y + e.h)
-          const area = Math.max(0, right - left) * Math.max(0, bottom - top)
-          if (area > 0 && (!best || area > best.area)) best = { e, area }
-        }
-        targetSeat = best?.e || null
+      let targetSeat: Element | null = null
+      let bestRatio = 0
+      const a = srcEl
+      const aArea = a.w * a.h
+      for (const e of candidates) {
+        const left = Math.max(a.x, e.x)
+        const right = Math.min(a.x + a.w, e.x + e.w)
+        const top = Math.max(a.y, e.y)
+        const bottom = Math.min(a.y + a.h, e.y + e.h)
+        const area = Math.max(0, right - left) * Math.max(0, bottom - top)
+        const ratio = aArea > 0 && e.w * e.h > 0 ? (area / Math.min(aArea, e.w * e.h)) : 0
+        if (ratio >= 0.5 && ratio > bestRatio) { bestRatio = ratio; targetSeat = e }
       }
       if (targetSeat) {
         // identify target unit (pair or single) – but swap strategy: always ensure 1:1 or 2:2, fallback 1:1
@@ -571,6 +580,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         if (start.size > 0) {
           setElements(prev => prev.map(e => start.has(e.id!) ? { ...e, x: start.get(e.id!)!.x, y: start.get(e.id!)!.y } : e))
         }
+        setDraggingGroupIds([])
         scheduleSave()
         return // do not proceed with snapping/jointing
       }
@@ -609,8 +619,26 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         if (score > bestScore) { bestScore = score; bestOther = other }
       }
       if (bestOther) {
+        // compute perfect alignment (nahtlos, ohne Überlappung) anhand Joint-Geometrie
         const joint = computeEdgeJointRect({ x: snappedCurrent.x, y: snappedCurrent.y, w: snappedCurrent.w, h: snappedCurrent.h }, { x: bestOther.x, y: bestOther.y, w: bestOther.w, h: bestOther.h })
-        const next = prev.map(e => e.id === id ? { ...snappedCurrent } : e)
+        let aligned = { ...snappedCurrent }
+        if (joint) {
+          const a = aligned, b = bestOther
+          if (joint.aSide === 'right' && joint.bSide === 'left') {
+            aligned.x = b.x - a.w
+            aligned.y = b.y + joint.bT * b.h - joint.aT * a.h
+          } else if (joint.aSide === 'left' && joint.bSide === 'right') {
+            aligned.x = b.x + b.w
+            aligned.y = b.y + joint.bT * b.h - joint.aT * a.h
+          } else if (joint.aSide === 'bottom' && joint.bSide === 'top') {
+            aligned.y = b.y - a.h
+            aligned.x = b.x + joint.bT * b.w - joint.aT * a.w
+          } else if (joint.aSide === 'top' && joint.bSide === 'bottom') {
+            aligned.y = b.y + b.h
+            aligned.x = b.x + joint.bT * b.w - joint.aT * a.w
+          }
+        }
+        const next = prev.map(e => e.id === id ? { ...aligned } : e)
         // Apply/update joint
         setTimeout(() => {
           if (joint) addJoint(id, bestOther!.id!, joint.aSide, joint.bSide, joint.aT, joint.bT)
@@ -629,6 +657,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       }, 0)
       return prev.map(e => e.id === id ? { ...snappedCurrent } : e)
     })
+    setDraggingGroupIds([])
     scheduleSave()
   }
 
@@ -780,6 +809,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     moveElementBy, onDragEnd, setElements, students, classId, roomId, loadPlan,
     setMarquee, marquee, editing, setEditing, detachOnDragRef, dragStartPositions,
     sidebarOpen, activeProfile, setTypeStyles, removeSelected, setStudents,
+    draggingGroupIds, setDraggingGroupIds,
     onInlineEditKeyDown: async (el: any, e: any) => {
       if (e.key === 'Escape') { setEditing({ id: null, value: '' }); return }
       if (e.key === 'Enter') {
