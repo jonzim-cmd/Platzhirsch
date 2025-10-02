@@ -536,11 +536,17 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         const targetIsPair = !!targetPartner && (elements.find(e => e.id === targetPartner!.id)?.type === 'STUDENT')
 
         const swap1to1 = (aId: string, bId: string) => {
-          setElements(prev => prev.map(e => {
-            if (e.id === aId) return { ...e, refId: prev.find(x => x.id === bId)?.refId ?? null }
-            if (e.id === bId) return { ...e, refId: prev.find(x => x.id === aId)?.refId ?? null }
-            return e
-          }))
+          const start = dragStartPositions.current
+          setElements(prev => {
+            const ref = new Map(prev.map(x => [x.id!, x.refId ?? null]))
+            return prev.map(e => {
+              let out = e
+              if (e.id === aId) out = { ...out, refId: ref.get(bId) ?? null }
+              else if (e.id === bId) out = { ...out, refId: ref.get(aId) ?? null }
+              if (start.size > 0 && start.has(e.id!)) out = { ...out, x: start.get(e.id!)!.x, y: start.get(e.id!)!.y }
+              return out
+            })
+          })
         }
         const swap2to2 = (aIds: string[], bIds: string[]) => {
           // stabile Indexbildung über Paar-Seite: 0 = left/top, 1 = right/bottom
@@ -553,14 +559,17 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
           }
           const A = [...aIds].sort((p, q) => pairIndex(p) - pairIndex(q))
           const B = [...bIds].sort((p, q) => pairIndex(p) - pairIndex(q))
+          const start = dragStartPositions.current
           setElements(prev => {
             const ref = new Map(prev.map(x => [x.id!, x.refId ?? null]))
             return prev.map(e => {
-              if (e.id === A[0]) return { ...e, refId: ref.get(B[0]) ?? null }
-              if (e.id === A[1]) return { ...e, refId: ref.get(B[1]) ?? null }
-              if (e.id === B[0]) return { ...e, refId: ref.get(A[0]) ?? null }
-              if (e.id === B[1]) return { ...e, refId: ref.get(A[1]) ?? null }
-              return e
+              let out = e
+              if (e.id === A[0]) out = { ...out, refId: ref.get(B[0]) ?? null }
+              else if (e.id === A[1]) out = { ...out, refId: ref.get(B[1]) ?? null }
+              else if (e.id === B[0]) out = { ...out, refId: ref.get(A[0]) ?? null }
+              else if (e.id === B[1]) out = { ...out, refId: ref.get(A[1]) ?? null }
+              if (start.size > 0 && start.has(e.id!)) out = { ...out, x: start.get(e.id!)!.x, y: start.get(e.id!)!.y }
+              return out
             })
           })
         }
@@ -576,12 +585,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         } else {
           swap1to1(srcEl.id!, targetSeat.id!)
         }
-        // revert geometry of entire source group to dragStart snapshot if present
-        const start = dragStartPositions.current
-        if (start.size > 0) {
-          setElements(prev => prev.map(e => start.has(e.id!) ? { ...e, x: start.get(e.id!)!.x, y: start.get(e.id!)!.y } : e))
-        }
-        
+        // geometry revert erfolgt innerhalb der swap setElements (ein Render)
         scheduleSave()
         return // do not proceed with snapping/jointing
       }
