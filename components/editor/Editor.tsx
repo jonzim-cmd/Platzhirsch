@@ -50,7 +50,8 @@ function overlapAmount(a1: number, a2: number, b1: number, b2: number) {
   return Math.max(0, right - left)
 }
 
-function touchesOrIntersects(a: Element, b: Element, tol = 0.5) {
+function touchesOrIntersects(a: Element | undefined | null, b: Element | undefined | null, tol = 0.5) {
+  if (!a || !b) return false
   // True if overlapping or edges touch within tolerance
   const vOverlap = overlapAmount(a.y, a.y + a.h, b.y, b.y + b.h)
   const hOverlap = overlapAmount(a.x, a.x + a.w, b.x, b.x + b.w)
@@ -58,7 +59,7 @@ function touchesOrIntersects(a: Element, b: Element, tol = 0.5) {
   if (vOverlap > 0 && Math.abs(a.x - (b.x + b.w)) <= tol) return true // a left to b right
   if (hOverlap > 0 && Math.abs((a.y + a.h) - b.y) <= tol) return true // a bottom to b top
   if (hOverlap > 0 && Math.abs(a.y - (b.y + b.h)) <= tol) return true // a top to b bottom
-  return intersects(a, b)
+  return intersects(a as Element, b as Element)
 }
 
 function snapDeltaToNearest(a: Element, others: Element[], threshold = 8) {
@@ -616,7 +617,11 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         groupIds.add(cur)
         const node = byId.get(cur)
         const links = Array.isArray(node?.meta?.joints) ? node!.meta!.joints as any[] : []
-        for (const l of links) if (!groupIds.has(l.otherId)) groupVisit.push(l.otherId)
+        for (const l of links) {
+          if (groupIds.has(l.otherId)) continue
+          if (!byId.has(l.otherId)) continue
+          groupVisit.push(l.otherId)
+        }
       }
       const movers = Array.from(groupIds)
       // For each mover: collect all touching externals, align to best, add joints for all touches
@@ -624,7 +629,8 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       const pendingJoints: PendingJoint[] = []
       const alignedPos = new Map<string, { x: number; y: number }>()
       for (const mid of movers) {
-        const me0 = (mid === id) ? snappedCurrent : byId.get(mid)!
+        const me0 = (mid === id) ? snappedCurrent : byId.get(mid)
+        if (!me0) continue
         let me = me0
         // find all externals that touch
         let bestOther: Element | null = null
@@ -681,7 +687,8 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         for (const j of pendingJoints) addJoint(j.aId, j.bId, j.aSide, j.bSide, j.aT, j.bT)
         // remove joints that no longer touch, for movers
         for (const mid of movers) {
-          const now = next.find(x => x.id === mid)!
+          const now = next.find(x => x.id === mid)
+          if (!now) continue
           for (const other of next) {
             if (other.id === mid) continue
             if (!touchesOrIntersects(now, other)) removeJoint(mid, other.id!)
