@@ -96,7 +96,7 @@ export async function importStudents(rows: ImportRow[]): Promise<ImportResult> {
   // Updates per row (needs individual where clauses)
   if (updates.length > 0) {
     const tx = updates.map(u => prisma.student.update({ where: { id: u.id }, data: { foreName: u.foreName, classId: u.classId, active: true } }))
-    await prisma.$transaction(tx, { timeout: 15000 })
+    await prisma.$transaction(tx)
     updatedStudents += updates.length
   }
 

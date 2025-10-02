@@ -237,7 +237,7 @@ export function EditorView({ ctx }: { ctx: any }) {
                   ctx.detachOnDragRef.current = false
                   ;(window as any).__lastMoveableEvent = e.inputEvent
                   if (!primarySelectedId) return
-                  const byId = new Map(elements.map((el: any) => [el.id, el]))
+                  const byId: Map<string, any> = new Map(elements.map((el: any) => [el.id, el]))
                   // move union der Gruppen aller selektierten, sofern primary enthalten, sonst nur primary Gruppe
                   const seeds: string[] = (selectedIds.includes(primarySelectedId) ? selectedIds : [primarySelectedId])
                   const toVisit: string[] = [...seeds]
@@ -246,7 +246,7 @@ export function EditorView({ ctx }: { ctx: any }) {
                     const curId = toVisit.pop()!
                     if (visited.has(curId)) continue
                     visited.add(curId)
-                    const node = byId.get(curId)
+                    const node: any = byId.get(curId)
                     const links: any[] = Array.isArray(node?.meta?.joints) ? node!.meta!.joints : []
                     for (const l of links) if (!visited.has(l.otherId)) toVisit.push(l.otherId)
                   }
@@ -330,7 +330,7 @@ export function EditorView({ ctx }: { ctx: any }) {
                 <Button onClick={() => { const sel = new Set(selectedIds); setElements((prev: any) => prev.map((el: any) => { if (!sel.has(el.id!)) return el; const links = Array.isArray(el.meta?.joints) ? el.meta!.joints as any[] : []; const nextLinks = links.filter((l: any) => !sel.has(l.otherId)); return { ...el, meta: { ...(el.meta || {}), joints: nextLinks } }; })); setElements((prev: any) => prev.map((el: any) => { const links = Array.isArray(el.meta?.joints) ? el.meta!.joints as any[] : []; const nextLinks = links.filter((l: any) => !sel.has(el.id!) || !sel.has(l.otherId)); return { ...el, meta: { ...(el.meta || {}), joints: nextLinks } }; })); scheduleSave() }}>Verbindungen der Auswahl lösen</Button>
               </div>
               <div className="flex items-center gap-2">
-                <Button onClick={() => { const v = selected?.meta?.fontSize ?? 20; const selTypes = new Set(elements.filter((e: any) => selectedIds.includes(e.id!)).map((e: any) => e.type)); ctx.setTypeStyles((prev: any) => { const cp = { ...prev }; for (const t of selTypes) cp[t] = { fontSize: v }; return cp }); setElements((prev: any) => prev.map((x: any) => selTypes.has(x.type) ? { ...x, meta: { ...(x.meta || {}), fontSize: v } } : x)); scheduleSave() }}>Auf alle Typen in Auswahl anwenden</Button>
+                <Button onClick={() => { const v = selected?.meta?.fontSize ?? 20; const selTypes = new Set(elements.filter((e: any) => selectedIds.includes(e.id!)).map((e: any) => e.type)); ctx.setTypeStyles((prev: any) => { const cp: any = { ...prev }; for (const t of selTypes) (cp as any)[t as any] = { fontSize: v }; return cp }); setElements((prev: any) => prev.map((x: any) => selTypes.has(x.type) ? { ...x, meta: { ...(x.meta || {}), fontSize: v } } : x)); scheduleSave() }}>Auf alle Typen in Auswahl anwenden</Button>
               </div>
               <div className="flex gap-2">
                 <Button onClick={ctx.removeSelected} variant="danger">Löschen</Button>

@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/server/db/client'
-import { noteDbFailure, shouldShortCircuit } from '@/server/db/health'
 
 // GET /api/profile-classes?profileId=...
 export async function GET(req: NextRequest) {
   try {
-    if (shouldShortCircuit()) return NextResponse.json([], { status: 200 })
     const { searchParams } = new URL(req.url)
     const profileId = searchParams.get('profileId') || ''
     if (!profileId) return NextResponse.json({ error: 'missing profileId' }, { status: 400 })
@@ -23,15 +21,13 @@ export async function GET(req: NextRequest) {
     }))
     return NextResponse.json(data)
   } catch (e: any) {
-    noteDbFailure()
-    return NextResponse.json([], { status: 200 })
+    return NextResponse.json({ error: e?.message ?? 'internal error' }, { status: 500 })
   }
 }
 
 // POST { profileId, classId, assigned }
 export async function POST(req: NextRequest) {
   try {
-    if (shouldShortCircuit()) return NextResponse.json({ error: 'database unavailable' }, { status: 503 })
     const body = await req.json().catch(() => null as any)
     const profileId = body?.profileId as string
     const classId = body?.classId as string
@@ -45,7 +41,6 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: true })
   } catch (e: any) {
-    noteDbFailure()
-    return NextResponse.json({ error: e?.message ?? 'internal error' }, { status: 503 })
+    return NextResponse.json({ error: e?.message ?? 'internal error' }, { status: 500 })
   }
 }

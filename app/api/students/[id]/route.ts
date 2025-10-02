@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/server/db/client'
-import { noteDbFailure, shouldShortCircuit } from '@/server/db/health'
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const id = params.id
@@ -10,12 +9,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: 'invalid body' }, { status: 400 })
   }
   const foreName = body.foreName.trim()
-  if (shouldShortCircuit()) return NextResponse.json({ error: 'database unavailable' }, { status: 503 })
   try {
     const s = await prisma.student.update({ where: { id }, data: { foreName } })
     return NextResponse.json(s)
   } catch (e) {
-    noteDbFailure()
-    return NextResponse.json({ error: 'update failed' }, { status: 503 })
+    return NextResponse.json({ error: 'update failed' }, { status: 500 })
   }
 }

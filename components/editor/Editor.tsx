@@ -817,7 +817,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
 
   // Try to create a joint by clicking the shared edge between two boxes
   const findJointCandidate = (x: number, y: number, tol = 12): null | { aId: string; bId: string; aSide: Side; bSide: Side; aT: number; bT: number } => {
-    if (readOnly) return false
+    if (readOnly) return null
     type Hit = { aId: string; bId: string; aSide: Side; bSide: Side; aT: number; bT: number; dist: number }
     let best: Hit | null = null
     const N = elements.length
