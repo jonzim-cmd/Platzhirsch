@@ -82,7 +82,7 @@ export function EditorView({ ctx }: { ctx: any }) {
                     setSelectedIds([el.id!])
                   }
                 }}
-                className={`absolute select-none ${(selectedIds.includes(el.id!) || (ctx.draggingGroupIds||[]).includes(el.id!)) ? 'ring-2 ring-primary/60' : ''}`}
+                className={`absolute select-none ${selectedIds.includes(el.id!) ? 'ring-2 ring-primary/60' : ''}`}
                 data-el={el.id}
                 style={{ left: el.x, top: el.y, width: el.w, height: el.h, transform: `rotate(${el.rotation}deg)`, zIndex: el.z }}
                 ref={(node) => { if (node) elementRefs.current.set(el.id!, node); else elementRefs.current.delete(el.id!) }}
@@ -202,14 +202,14 @@ export function EditorView({ ctx }: { ctx: any }) {
                     const links: any[] = Array.isArray(node?.meta?.joints) ? node!.meta!.joints : []
                     for (const l of links) if (!visited.has(l.otherId)) toVisit.push(l.otherId)
                   }
-                  ctx.setDraggingGroupIds(Array.from(visited))
+                  // no drag preview highlighting
                   ctx.dragStartPositions.current.clear()
                   for (const vid of visited) {
                     const n = byId.get(vid)
                     if (n) ctx.dragStartPositions.current.set(vid, { x: n.x, y: n.y })
                   }
                 }}
-                onDragEnd={() => { if (primarySelectedId) { onDragEnd(primarySelectedId, { detach: ctx.detachOnDragRef.current }); ctx.setDraggingGroupIds([]) } }}
+                onDragEnd={() => { if (primarySelectedId) { onDragEnd(primarySelectedId, { detach: ctx.detachOnDragRef.current }) } }}
                 onResizeStart={(e: any) => { e.setKeepRatio?.(e.inputEvent?.shiftKey === true) }}
                 onResize={ctx.onMoveableResize}
                 onResizeEnd={() => scheduleSave()}

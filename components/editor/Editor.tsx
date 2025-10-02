@@ -130,7 +130,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   const detachOnDragRef = useRef(false)
   const dragStartPositions = useRef<Map<string, { x: number; y: number }>>(new Map())
   const dragTriedSwap = useRef(false)
-  const [draggingGroupIds, setDraggingGroupIds] = useState<string[]>([])
+  // removed drag-preview state (caused duplication perception)
   // no modal/state needed for simplified quick layout
 
   const applyPairsLayout = () => {
@@ -491,7 +491,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
           if (e.id === target.id) return { ...e, x: srcEl.x, y: srcEl.y, w: srcEl.w, h: srcEl.h, rotation: srcEl.rotation, z: srcEl.z }
           return e
         }))
-        setDraggingGroupIds([])
+        
         scheduleSave()
         return
       }
@@ -581,7 +581,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         if (start.size > 0) {
           setElements(prev => prev.map(e => start.has(e.id!) ? { ...e, x: start.get(e.id!)!.x, y: start.get(e.id!)!.y } : e))
         }
-        setDraggingGroupIds([])
+        
         scheduleSave()
         return // do not proceed with snapping/jointing
       }
@@ -698,7 +698,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       }, 0)
       return next
     })
-    setDraggingGroupIds([])
+    
     scheduleSave()
   }
 
@@ -850,7 +850,6 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     moveElementBy, onDragEnd, setElements, students, classId, roomId, loadPlan,
     setMarquee, marquee, editing, setEditing, detachOnDragRef, dragStartPositions,
     sidebarOpen, activeProfile, setTypeStyles, removeSelected, setStudents,
-    draggingGroupIds, setDraggingGroupIds,
     onInlineEditKeyDown: async (el: any, e: any) => {
       if (e.key === 'Escape') { setEditing({ id: null, value: '' }); return }
       if (e.key === 'Enter') {
