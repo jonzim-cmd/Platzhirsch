@@ -1,8 +1,0 @@
-{
-  "/page": "app/page.js",
-  "/api/profiles/route": "app/api/profiles/route.js",
-  "/api/import/route": "app/api/import/route.js",
-  "/api/profile-classes/route": "app/api/profile-classes/route.js",
-  "/api/rooms/route": "app/api/rooms/route.js",
-  "/api/classes/route": "app/api/classes/route.js"
-}
