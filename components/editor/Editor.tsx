@@ -429,12 +429,8 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       const teacher = elements.find(e => e.type === 'TEACHER_DESK')
       const door = elements.find(e => e.type === 'DOOR')
       if (teacher || door) {
-        const firstRow = students.filter(s => s.y <= minY + Math.max(24, 0.6 * (students.reduce((a, s) => a + s.h, 0) / students.length)))
-        const firstRowBottom = firstRow.length ? Math.max(...firstRow.map(s => s.y + s.h)) : maxB
-        const rowY = Math.min(
-          frameSize.h - Math.max(teacher?.h ?? 80, door?.h ?? 32) - margin,
-          firstRowBottom + strongGap,
-        )
+        // Lehrer und Tür bilden die unterste Begrenzung: immer an die untere Zeile setzen
+        const rowY = frameSize.h - Math.max(teacher?.h ?? 80, door?.h ?? 32) - margin
         if (teacher && wall) {
           const cx = wall.x + wall.w / 2
           const nx = Math.max(margin, Math.min(frameSize.w - margin - teacher.w, cx - teacher.w / 2))
@@ -664,7 +660,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     const seatH = 70
     const marginX = 40
     const marginY = 40
-    let between = 16 // will recompute for W rooms
+    let between = 16 // will recompute for W rooms (top run)
     const downGap = 24 // vertical gap between rows/columns
 
     const nStudents = students.length
@@ -676,7 +672,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     const addSeat = (x: number, y: number, rot = 0) => {
       newSeats.push({ id: uid('el'), type: 'STUDENT', refId: null, x, y, w: seatW, h: seatH, rotation: rot, z: newSeats.length, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } })
     }
-    // Compute top run capacity (prefer 8 if space, else max that fits)
+    // Compute top run capacity inside inner band between wall/window
     let leftBandW = marginX
     let rightBandW = marginX
     let availW = (frameSize.w - 2 * marginX)
@@ -705,26 +701,42 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       addSeat(startTopX + i * (seatW + between), topY)
       used++
     }
-    // Nudge two middle seats downward to protrude into center (if available)
-    if (newSeats.length >= 2) {
-      const midL = Math.floor((newSeats.length - 1) / 2)
-      const midR = Math.ceil((newSeats.length - 1) / 2)
-      if (newSeats[midL]) newSeats[midL] = { ...newSeats[midL], y: newSeats[midL].y + Math.floor(seatH * 0.4) }
-      if (newSeats[midR]) newSeats[midR] = { ...newSeats[midR], y: newSeats[midR].y + Math.floor(seatH * 0.4) }
-    }
-    // Left column downward
+    // Side columns with two inward 2er-Reihen (wie im Bild) und Bodenbegrenzung durch Lehrer/Tür
     const leftX = roomNameStartsWithW ? leftBandW : marginX
-    for (let k = 0; used < n && k < 50; k++) {
-      const y = topY + seatH + downGap + k * (seatH + downGap)
-      addSeat(leftX, y, 0)
-      used++
-    }
-    // Right column downward
     const rightX = roomNameStartsWithW ? (frameSize.w - rightBandW - seatW) : (frameSize.w - marginX - seatW)
-    for (let k = 0; used < n && k < 50; k++) {
+    const teacher = elements.find(e => e.type === 'TEACHER_DESK')
+    const door = elements.find(e => e.type === 'DOOR')
+    const bottomRowY = frameSize.h - marginY - Math.max(teacher?.h ?? 80, door?.h ?? 32)
+    // compute vertical levels available above bottom boundary
+    const levels: number[] = []
+    for (let k = 0; k < 100; k++) {
       const y = topY + seatH + downGap + k * (seatH + downGap)
-      addSeat(rightX, y, 0)
-      used++
+      if (y + seatH > bottomRowY - 1) break
+      levels.push(y)
+    }
+    // choose 1-2 inner pair levels depending on height
+    const innerIdx: number[] = []
+    if (levels.length >= 6) innerIdx.push(Math.floor(levels.length / 3), Math.floor((2 * levels.length) / 3))
+    else if (levels.length >= 3) innerIdx.push(Math.floor(levels.length / 2))
+    // place per level, left then right, substituting the column seat with a 2er nach innen
+    for (let i = 0; i < levels.length && used < n; i++) {
+      const y = levels[i]
+      const isInner = innerIdx.includes(i)
+      if (isInner) {
+        // left inward pair (2 Sitze)
+        if (used < n) { addSeat(Math.min(leftX + seatW, rightX - seatW * 2), y); used++ }
+        if (used < n) { addSeat(Math.min(leftX + seatW * 2, rightX - seatW), y); used++ }
+      } else {
+        if (used < n) { addSeat(leftX, y); used++ }
+      }
+      if (used >= n) break
+      if (isInner) {
+        // right inward pair (2 Sitze)
+        if (used < n) { addSeat(Math.max(rightX - seatW * 2, leftX + seatW), y); used++ }
+        if (used < n) { addSeat(Math.max(rightX - seatW, leftX + seatW * 2), y); used++ }
+      } else {
+        if (used < n) { addSeat(rightX, y); used++ }
+      }
     }
 
     // Assign refIds consistently
