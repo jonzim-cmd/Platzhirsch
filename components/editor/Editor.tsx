@@ -722,19 +722,16 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     for (let i = 0; i < levels.length && used < n; i++) {
       const y = levels[i]
       const isInner = innerIdx.includes(i)
-      if (isInner) {
-        // left inward pair (2 Sitze)
-        if (used < n) { addSeat(Math.min(leftX + seatW, rightX - seatW * 2), y); used++ }
-        if (used < n) { addSeat(Math.min(leftX + seatW * 2, rightX - seatW), y); used++ }
-      } else {
-        if (used < n) { addSeat(leftX, y); used++ }
-      }
-      if (used >= n) break
-      if (isInner) {
-        // right inward pair (2 Sitze)
+      const remaining = n - used
+      if (isInner && remaining >= 4) {
+        // vollwertige 2er-Reihen links und rechts
+        addSeat(Math.min(leftX + seatW, rightX - seatW * 2), y); used++
+        addSeat(Math.min(leftX + seatW * 2, rightX - seatW), y); used++
         if (used < n) { addSeat(Math.max(rightX - seatW * 2, leftX + seatW), y); used++ }
         if (used < n) { addSeat(Math.max(rightX - seatW, leftX + seatW * 2), y); used++ }
       } else {
+        // Spalten ohne Lücken auffüllen (oder Fallback, wenn nicht genug für 2er-Reihen)
+        addSeat(leftX, y); used++
         if (used < n) { addSeat(rightX, y); used++ }
       }
     }
