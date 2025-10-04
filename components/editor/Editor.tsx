@@ -1139,7 +1139,10 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       const partner = pInfo?.partner ?? null
       const sourceUnitIds = partner ? [srcEl.id!, partner.id!] : [srcEl.id!]
       // gesamte Quellgruppe sammeln (für Kandidatenfilter, Rücksetzen Geometrie und N↔N‑Tausch)
-      const sourceGroupIds = getGroupIds([srcEl.id!])
+      // Wenn mehrere STUDENTs gemeinsam selektiert sind und die Drag-Quelle enthalten, nutze die Selektion als Startmenge
+      const selectionSeed = selectedIds.includes(srcEl.id!) ? selectedIds.slice() : [srcEl.id!]
+      const selectionSeedStudents = selectionSeed.filter(id => (elements.find(e => e.id === id)?.type === 'STUDENT'))
+      const sourceGroupIds = getGroupIds(selectionSeedStudents.length > 0 ? selectionSeedStudents : [srcEl.id!])
       const sourceGroupStudents = elements.filter(e => sourceGroupIds.includes(e.id!) && e.type === 'STUDENT').map(e => e.id!)
       // find target seat by >=50% Überdeckung, Kandidaten ohne Quellgruppe
       const candidates = elements.filter(e => e.type === 'STUDENT' && !sourceGroupIds.includes(e.id!))
@@ -1157,87 +1160,84 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         if (ratio >= 0.5 && ratio > bestRatio) { bestRatio = ratio; targetSeat = e }
       }
       if (targetSeat) {
-        // Zielgruppe ermitteln (N↔N)
-        const targetGroupIds = getGroupIds([targetSeat.id!])
-        const targetGroupStudents = elements.filter(e => targetGroupIds.includes(e.id!) && e.type === 'STUDENT').map(e => e.id!)
+        // Für Gruppen (>1) Zielcluster geometrisch ableiten; Singles fallen unten in 1:1 zurück
+        if (sourceGroupStudents.length > 1) {
+        // Zielcluster geometrisch (layout-unabhängig) bestimmen – gleiche Zeile (Row-Band) um das Ziel
+        const srcList = elements.filter(e => sourceGroupStudents.includes(e.id!))
+        const targetCenterY = targetSeat.y + targetSeat.h / 2
+        const sameRow = (e: Element) => {
+          const cy = e.y + e.h / 2
+          const band = Math.max(e.h, targetSeat.h) * 0.6
+          return Math.abs(cy - targetCenterY) <= band
+        }
+        const tgtList = elements.filter(e => e.type === 'STUDENT' && !sourceGroupIds.includes(e.id!) && sameRow(e))
 
-        const swapNtoN = (Aids: string[], Bids: string[]) => {
-          const sortByPos = (ids: string[]) => {
-            const list = ids.map(id => elements.find(e => e.id === id)!).filter(Boolean)
-            return list.sort((p, q) => (p.y - q.y) || (p.x - q.x)).map(e => e.id!)
+        // Greedy Matching Quelle↔Ziel mit Überdeckungs-/Nähe-Score, bis min(|A|, |B|)
+        const start = dragStartPositions.current
+        const area = (x: Element) => x.w * x.h
+        type Cand = { aId: string; bId: string; score: number }
+        const cands: Cand[] = []
+        const center = (el: Element) => ({ cx: el.x + el.w / 2, cy: el.y + el.h / 2 })
+        for (const s of srcList) {
+          for (const t of tgtList) {
+            const left = Math.max(s.x, t.x)
+            const right = Math.min(s.x + s.w, t.x + t.w)
+            const top = Math.max(s.y, t.y)
+            const bottom = Math.min(s.y + s.h, t.y + t.h)
+            const inter = Math.max(0, right - left) * Math.max(0, bottom - top)
+            const denom = Math.min(area(s), area(t))
+            const overlap = denom > 0 ? (inter / denom) : 0
+            const { cx: sx, cy: sy } = center(s)
+            const { cx: tx, cy: ty } = center(t)
+            const dx = Math.abs(sx - tx) / Math.max(s.w, t.w)
+            const dy = Math.abs(sy - ty) / Math.max(s.h, t.h)
+            // Priorisiere echte Überdeckung, sonst Nähe innerhalb der Zeile
+            const score = overlap > 0 ? (1 + overlap) : (1 / (1 + dx + 0.25 * dy))
+            cands.push({ aId: s.id!, bId: t.id!, score })
           }
-          const A = sortByPos(Aids)
-          const B = sortByPos(Bids)
-          if (A.length !== B.length) return false
-          const start = dragStartPositions.current
+        }
+        cands.sort((p, q) => q.score - p.score)
+        const usedA = new Set<string>()
+        const usedB = new Set<string>()
+        const pairs: Array<{ aId: string; bId: string }> = []
+        const want = Math.min(srcList.length, tgtList.length)
+        for (const c of cands) {
+          if (pairs.length >= want) break
+          if (usedA.has(c.aId) || usedB.has(c.bId)) continue
+          usedA.add(c.aId); usedB.add(c.bId)
+          pairs.push({ aId: c.aId, bId: c.bId })
+        }
+        if (pairs.length > 0) {
+          // wende alle gefundenen Paare in einem State-Update an
           setElements(prev => {
             const ref = new Map(prev.map(x => [x.id!, x.refId ?? null]))
-            return prev.map(e => {
+            const changes = new Map<string, any>()
+            for (const p of pairs) {
+              changes.set(p.aId, ref.get(p.bId) ?? null)
+              changes.set(p.bId, ref.get(p.aId) ?? null)
+            }
+            let next = prev.map(e => {
               let out = e
-              const ia = A.indexOf(e.id!)
-              const ib = B.indexOf(e.id!)
-              if (ia >= 0) out = { ...out, refId: ref.get(B[ia]) ?? null }
-              else if (ib >= 0) out = { ...out, refId: ref.get(A[ib]) ?? null }
+              if (changes.has(e.id!)) out = { ...out, refId: changes.get(e.id!) }
               if (start.size > 0 && start.has(e.id!)) out = { ...out, x: start.get(e.id!)!.x, y: start.get(e.id!)!.y }
               return out
             })
+            const protectedIds = new Set<string>(pairs.flatMap(p => [p.aId, p.bId]))
+            const seen = new Map<any, string>()
+            next = next.map(e => {
+              if (e.type !== 'STUDENT' || e.refId == null) return e
+              const key = String(e.refId)
+              const owner = seen.get(key)
+              if (!owner) { seen.set(key, e.id!); return e }
+              if (protectedIds.has(e.id!) && !protectedIds.has(owner)) { seen.set(key, e.id!); return next.map(x => x.id===owner?{...x, refId: null}:x) as any }
+              if (!protectedIds.has(e.id!) && protectedIds.has(owner)) return { ...e, refId: null }
+              return { ...e, refId: null }
+            }) as any
+            return Array.isArray(next) ? (Array.isArray(next[0]) ? (next as any).flat() : next) : prev
           })
-          return true
+          scheduleSave()
+          return
         }
-
-        // Wenn beide Gruppen gleich groß und > 1: N↔N‑Tausch
-        if (sourceGroupStudents.length > 1 && sourceGroupStudents.length === targetGroupStudents.length) {
-          const ok = swapNtoN(sourceGroupStudents, targetGroupStudents)
-          if (ok) { scheduleSave(); return }
-        }
-        // Bei ungleichen Gruppengrößen: nur überlappte Plätze tauschen (greedy nach größter Überdeckung)
-        if (sourceGroupStudents.length !== targetGroupStudents.length) {
-          const swapPairs = (pairs: Array<{ aId: string; bId: string }>) => {
-            const start = dragStartPositions.current
-            setElements(prev => {
-              const ref = new Map(prev.map(x => [x.id!, x.refId ?? null]))
-              const aMap = new Map(pairs.map(p => [p.aId, p.bId]))
-              const bMap = new Map(pairs.map(p => [p.bId, p.aId]))
-              return prev.map(e => {
-                let out = e
-                if (aMap.has(e.id!)) out = { ...out, refId: ref.get(aMap.get(e.id!)!) ?? null }
-                else if (bMap.has(e.id!)) out = { ...out, refId: ref.get(bMap.get(e.id!)!) ?? null }
-                if (start.size > 0 && start.has(e.id!)) out = { ...out, x: start.get(e.id!)!.x, y: start.get(e.id!)!.y }
-                return out
-              })
-            })
-          }
-          type Cand = { aId: string; bId: string; ratio: number }
-          const srcList = elements.filter(e => sourceGroupStudents.includes(e.id!))
-          const tgtList = elements.filter(e => targetGroupStudents.includes(e.id!))
-          const area = (x: Element) => x.w * x.h
-          const cands: Cand[] = []
-          for (const s of srcList) {
-            for (const t of tgtList) {
-              const left = Math.max(s.x, t.x)
-              const right = Math.min(s.x + s.w, t.x + t.w)
-              const top = Math.max(s.y, t.y)
-              const bottom = Math.min(s.y + s.h, t.y + t.h)
-              const a = Math.max(0, right - left) * Math.max(0, bottom - top)
-              const denom = Math.min(area(s), area(t))
-              const ratio = denom > 0 ? (a / denom) : 0
-              if (ratio >= 0.5) cands.push({ aId: s.id!, bId: t.id!, ratio })
-            }
-          }
-          cands.sort((p, q) => q.ratio - p.ratio)
-          const usedA = new Set<string>()
-          const usedB = new Set<string>()
-          const pairs: Array<{ aId: string; bId: string }> = []
-          for (const c of cands) {
-            if (usedA.has(c.aId) || usedB.has(c.bId)) continue
-            usedA.add(c.aId); usedB.add(c.bId)
-            pairs.push({ aId: c.aId, bId: c.bId })
-          }
-          if (pairs.length > 0) {
-            swapPairs(pairs)
-            scheduleSave()
-            return
-          }
         }
         // identify target unit (pair or single) – but swap strategy: always ensure 1:1 or 2:2, fallback 1:1
         const targetInfo = getStudentPairPartner(targetSeat)
@@ -1249,13 +1249,29 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
           const start = dragStartPositions.current
           setElements(prev => {
             const ref = new Map(prev.map(x => [x.id!, x.refId ?? null]))
-            return prev.map(e => {
+            const changes = new Map<string, any>([[aId, ref.get(bId) ?? null], [bId, ref.get(aId) ?? null]])
+            // apply changes
+            let next = prev.map(e => {
               let out = e
-              if (e.id === aId) out = { ...out, refId: ref.get(bId) ?? null }
-              else if (e.id === bId) out = { ...out, refId: ref.get(aId) ?? null }
+              if (changes.has(e.id!)) out = { ...out, refId: changes.get(e.id!) }
               if (start.size > 0 && start.has(e.id!)) out = { ...out, x: start.get(e.id!)!.x, y: start.get(e.id!)!.y }
               return out
             })
+            // enforce unique refIds for affected students
+            const protectedIds = new Set([aId, bId])
+            const seen = new Map<any, string>()
+            next = next.map(e => {
+              if (e.type !== 'STUDENT' || e.refId == null) return e
+              const key = String(e.refId)
+              const owner = seen.get(key)
+              if (!owner) { seen.set(key, e.id!); return e }
+              // duplicate: prefer protected seat, else keep first
+              if (protectedIds.has(e.id!) && !protectedIds.has(owner)) { seen.set(key, e.id!); return next.map(x => x.id===owner?{...x, refId: null}:x) as any }
+              if (!protectedIds.has(e.id!) && protectedIds.has(owner)) return { ...e, refId: null }
+              // neither or both protected: null this later duplicate
+              return { ...e, refId: null }
+            }) as any
+            return Array.isArray(next) ? (Array.isArray(next[0]) ? (next as any).flat() : next) : prev
           })
         }
         const swap2to2 = (aIds: string[], bIds: string[]) => {
@@ -1272,15 +1288,30 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
           const start = dragStartPositions.current
           setElements(prev => {
             const ref = new Map(prev.map(x => [x.id!, x.refId ?? null]))
-            return prev.map(e => {
+            const changes = new Map<string, any>([
+              [A[0], ref.get(B[0]) ?? null],
+              [A[1], ref.get(B[1]) ?? null],
+              [B[0], ref.get(A[0]) ?? null],
+              [B[1], ref.get(A[1]) ?? null],
+            ])
+            let next = prev.map(e => {
               let out = e
-              if (e.id === A[0]) out = { ...out, refId: ref.get(B[0]) ?? null }
-              else if (e.id === A[1]) out = { ...out, refId: ref.get(B[1]) ?? null }
-              else if (e.id === B[0]) out = { ...out, refId: ref.get(A[0]) ?? null }
-              else if (e.id === B[1]) out = { ...out, refId: ref.get(A[1]) ?? null }
+              if (changes.has(e.id!)) out = { ...out, refId: changes.get(e.id!) }
               if (start.size > 0 && start.has(e.id!)) out = { ...out, x: start.get(e.id!)!.x, y: start.get(e.id!)!.y }
               return out
             })
+            const protectedIds = new Set([...A, ...B])
+            const seen = new Map<any, string>()
+            next = next.map(e => {
+              if (e.type !== 'STUDENT' || e.refId == null) return e
+              const key = String(e.refId)
+              const owner = seen.get(key)
+              if (!owner) { seen.set(key, e.id!); return e }
+              if (protectedIds.has(e.id!) && !protectedIds.has(owner)) { seen.set(key, e.id!); return next.map(x => x.id===owner?{...x, refId: null}:x) as any }
+              if (!protectedIds.has(e.id!) && protectedIds.has(owner)) return { ...e, refId: null }
+              return { ...e, refId: null }
+            }) as any
+            return Array.isArray(next) ? (Array.isArray(next[0]) ? (next as any).flat() : next) : prev
           })
         }
 
