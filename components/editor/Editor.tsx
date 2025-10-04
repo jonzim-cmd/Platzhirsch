@@ -136,14 +136,348 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   // removed drag-preview state (caused duplication perception)
   // no modal/state needed for simplified quick layout
 
+  // After a quick layout, align Lehrer/Tür/Fenster/Wand to seats and edges
+  const realignFixedElements = (allEls: Element[]): Element[] => {
+    const elements = allEls.map(e => ({ ...e }))
+    const students = elements.filter(e => e.type === 'STUDENT')
+    const margin = 16
+    const strongGap = 28
+
+    // Simplest, deterministic anchoring for W-rooms: snap specials to screen edges
+    if (roomNameStartsWithW) {
+      const BAR_THICK_DEFAULT = 32
+      const TEACH_W = 260, TEACH_H = 80
+      const DOOR_W = 120, DOOR_H = 32
+
+      // place/normalize wall and window bars (full height band at sides)
+      for (let i = 0; i < elements.length; i++) {
+        const e = elements[i]
+        if (e.type === 'WALL_SIDE' || e.type === 'WINDOW_SIDE') {
+          const thick = e.h || BAR_THICK_DEFAULT
+          const centerX = (e.type === 'WALL_SIDE')
+            ? (margin + thick / 2)
+            : (frameSize.w - margin - thick / 2)
+          const len = Math.max(160, frameSize.h - 2 * margin)
+          elements[i] = { ...e, rotation: 90, h: thick, w: len, x: centerX - len / 2, y: (frameSize.h - thick) / 2 }
+        }
+      }
+      const wallBar = elements.find(e => e.type === 'WALL_SIDE')
+      const winBar = elements.find(e => e.type === 'WINDOW_SIDE')
+      const leftThick = wallBar ? (wallBar.h || BAR_THICK_DEFAULT) : BAR_THICK_DEFAULT
+      const rightThick = winBar ? (winBar.h || BAR_THICK_DEFAULT) : BAR_THICK_DEFAULT
+      const TEACH_GAP_LEFT = 12  // extra gap so teacher never overlaps wall bar
+      const DOOR_GAP_RIGHT = 4   // door can be near window but not overlap
+
+      // place teacher bottom-left (offset by wall thickness + gap), door bottom-right (offset by window thickness + gap)
+      for (let i = 0; i < elements.length; i++) {
+        const e = elements[i]
+        if (e.type === 'TEACHER_DESK') {
+          const w = e.w || TEACH_W, h = e.h || TEACH_H
+          const nx = Math.max(margin + leftThick + TEACH_GAP_LEFT, Math.min(frameSize.w - margin - w, margin + leftThick + TEACH_GAP_LEFT))
+          elements[i] = { ...e, w, h, x: nx, y: Math.max(0, frameSize.h - margin - h) }
+        } else if (e.type === 'DOOR') {
+          const w = e.w || DOOR_W, h = e.h || DOOR_H
+          const nx = Math.max(margin, frameSize.w - margin - rightThick - DOOR_GAP_RIGHT - w)
+          elements[i] = { ...e, w, h, x: nx, y: Math.max(0, frameSize.h - margin - h) }
+        }
+      }
+      // Normalize z: specials below students
+      const nonStudents = elements.filter(e => e.type !== 'STUDENT')
+      const studentsList = elements.filter(e => e.type === 'STUDENT')
+      const typePriority: Record<ElementType, number> = {
+        WINDOW_SIDE: 1 as any,
+        WALL_SIDE: 2 as any,
+        DOOR: 3 as any,
+        TEACHER_DESK: 4 as any,
+        STUDENT: 5,
+      }
+      nonStudents.sort((a, b) => (typePriority[a.type] ?? 100) - (typePriority[b.type] ?? 100))
+      let zc = 1
+      for (const e of nonStudents) e.z = zc++
+      for (const e of studentsList) e.z = zc++
+      return [...nonStudents, ...studentsList]
+    }
+
+    // Fallback (non-W) — keep previous behavior based on students
+    if (students.length === 0) return elements
+    const minY = Math.min(...students.map(s => s.y))
+    const maxB = Math.max(...students.map(s => s.y + s.h))
+    const minX = Math.min(...students.map(s => s.x))
+    const maxR = Math.max(...students.map(s => s.x + s.w))
+
+    type Box = { left: number; top: number; right: number; bottom: number }
+    const buildObstacles = (els: Element[]): Box[] => {
+      const obs: Box[] = []
+      for (const el of els) {
+        const rot = (((el.rotation || 0) % 360) + 360) % 360
+        const rad = rot * Math.PI / 180
+        const cos = Math.cos(rad)
+        const sin = Math.sin(rad)
+        const bbW = Math.abs(el.w * cos) + Math.abs(el.h * sin)
+        const bbH = Math.abs(el.w * sin) + Math.abs(el.h * cos)
+        const cx = el.x + el.w / 2
+        const cy = el.y + el.h / 2
+        let left = cx - bbW / 2
+        let top = cy - bbH / 2
+        let right = cx + bbW / 2
+        let bottom = cy + bbH / 2
+        const clearance = el.type === 'STUDENT' ? 32 : (el.type === 'WINDOW_SIDE' || el.type === 'WALL_SIDE') ? 20 : 12
+        left -= clearance; top -= clearance; right += clearance; bottom += clearance
+        obs.push({ left, top, right, bottom })
+      }
+      return obs
+    }
+    let obstacles = buildObstacles(elements)
+
+    // Place teacher under the leftmost student column (first row), at same band
+    const placeTeacher = (e: Element): Element => {
+      const base = { ...e, w: 260, h: 80 }
+      const avgH = students.reduce((a, s) => a + s.h, 0) / students.length
+      const tol = Math.max(24, 0.6 * avgH)
+      const firstRow = students.filter(s => s.y <= minY + tol)
+      const firstRowBottom = Math.max(...firstRow.map(s => s.y + s.h))
+      const targetY = Math.min(frameSize.h - base.h - margin, firstRowBottom + strongGap)
+      const xDomainL = margin
+      const xDomainR = Math.max(xDomainL, frameSize.w - margin - base.w)
+      const forbiddenXIntervals = (y: number): Array<[number, number]> => {
+        const T = y, B = y + base.h
+        const acc: Array<[number, number]> = []
+        for (const b of obstacles) { if (!(B <= b.top || T >= b.bottom)) acc.push([b.left - base.w, b.right]) }
+        acc.sort((a,b) => a[0] - b[0])
+        const merged: Array<[number, number]> = []
+        for (const iv of acc) { if (!merged.length || iv[0] > merged[merged.length - 1][1]) merged.push([iv[0], iv[1]]); else merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1]) }
+        return merged
+      }
+      const tryNearestToX = (y: number, desiredX: number): number | null => {
+        const merged = forbiddenXIntervals(y)
+        // build gaps
+        let cur = xDomainL
+        const gaps: Array<[number, number]> = []
+        for (const [s, e] of merged) {
+          if (e <= xDomainL) { cur = Math.max(cur, e); continue }
+          if (s > xDomainR) break
+          if (s > cur) gaps.push([cur, Math.min(s, xDomainR)])
+          cur = Math.max(cur, e)
+        }
+        if (cur < xDomainR) gaps.push([cur, xDomainR])
+        if (gaps.length === 0) return null
+        // choose gap where placing at desiredX fits, else closest edge
+        let bestX: number | null = null
+        let bestD = Infinity
+        for (const [gL, gR] of gaps) {
+          const px = Math.min(Math.max(desiredX, gL), gR - base.w)
+          if (px < gL || px > gR - base.w) continue
+          const center = px + base.w / 2
+          const d = Math.abs(center - (desiredX + base.w / 2))
+          if (d < bestD) { bestD = d; bestX = px }
+        }
+        return bestX
+      }
+      let placed = false
+      const yMin = Math.min(targetY, frameSize.h - margin - base.h)
+      const yMax = Math.max(yMin, frameSize.h - margin - base.h)
+      // desired X under the leftmost first-row seat center
+      const leftSeat = firstRow.reduce((m, s) => (s.x < m.x ? s : m), firstRow[0])
+      const desiredX = leftSeat.x + leftSeat.w / 2 - base.w / 2
+      for (let y = yMin; y <= yMax; y += 6) { const px = tryNearestToX(y, desiredX); if (px !== null) { base.x = px; base.y = y; placed = true; break } }
+      if (!placed) { const lastY = frameSize.h - margin - base.h; const px = tryNearestToX(lastY, desiredX); if (px !== null) { base.x = px; base.y = lastY } else { base.x = Math.max(xDomainL, Math.min(xDomainR, desiredX)); base.y = lastY } }
+      return base
+    }
+
+    // Place door opposite to teacher at same row (y), hugging the opposite edge, avoiding overlaps
+    const placeDoorOppositeTeacher = (e: Element, teacher: Element | null): Element => {
+      const base = { ...e, w: 120, h: 32 }
+      const y = teacher ? teacher.y : Math.max(0, Math.min(frameSize.h - base.h, (minY + maxB) / 2))
+      const xDomainL = margin
+      const xDomainR = Math.max(xDomainL, frameSize.w - margin - base.w)
+      const forbiddenXIntervals = (yy: number): Array<[number, number]> => {
+        const T = yy, B = yy + base.h
+        const acc: Array<[number, number]> = []
+        for (const b of obstacles) { if (!(B <= b.top || T >= b.bottom)) acc.push([b.left - base.w, b.right]) }
+        acc.sort((a,b) => a[0] - b[0])
+        const merged: Array<[number, number]> = []
+        for (const iv of acc) { if (!merged.length || iv[0] > merged[merged.length - 1][1]) merged.push([iv[0], iv[1]]); else merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1]) }
+        return merged
+      }
+      const tryNearestToX = (yy: number, desiredX: number): number | null => {
+        const merged = forbiddenXIntervals(yy)
+        // build gaps
+        let cur = xDomainL
+        const gaps: Array<[number, number]> = []
+        for (const [s, e] of merged) {
+          if (e <= xDomainL) { cur = Math.max(cur, e); continue }
+          if (s > xDomainR) break
+          if (s > cur) gaps.push([cur, Math.min(s, xDomainR)])
+          cur = Math.max(cur, e)
+        }
+        if (cur < xDomainR) gaps.push([cur, xDomainR])
+        if (gaps.length === 0) return null
+        // choose gap near desiredX
+        let bestX: number | null = null
+        let bestD = Infinity
+        for (const [gL, gR] of gaps) {
+          const px = Math.min(Math.max(desiredX, gL), gR - base.w)
+          if (px < gL || px > gR - base.w) continue
+          const center = px + base.w / 2
+          const d = Math.abs(center - (desiredX + base.w / 2))
+          if (d < bestD) { bestD = d; bestX = px }
+        }
+        return bestX
+      }
+      // desired X under the rightmost first-row seat center
+      const firstRowSeats = students.filter(s => s.y <= (minY + Math.max(24, 0.6 * (students.reduce((a, s) => a + s.h, 0) / students.length))))
+      const rightSeat = firstRowSeats.reduce((m, s) => ((s.x > m.x) ? s : m), firstRowSeats[0] ?? students[0])
+      const desiredX = rightSeat.x + rightSeat.w / 2 - base.w / 2
+      const px = tryNearestToX(y, desiredX)
+      if (px !== null) return { ...base, x: px, y }
+      // fallback small scan
+      for (let dy = 0; dy <= 48; dy += 6) {
+        const yy1 = Math.max(0, Math.min(frameSize.h - base.h, y - dy))
+        const yy2 = Math.max(0, Math.min(frameSize.h - base.h, y + dy))
+        const p1 = tryNearestToX(yy1, desiredX)
+        if (p1 !== null) return { ...base, x: p1, y: yy1 }
+        const p2 = tryNearestToX(yy2, desiredX)
+        if (p2 !== null) return { ...base, x: p2, y: yy2 }
+      }
+      return { ...base, x: Math.max(xDomainL, Math.min(xDomainR, desiredX)), y }
+    }
+
+    // WINDOW_SIDE/WALL_SIDE: deterministic sides based on room preference
+    const placeSideBar = (e: Element, side: 'left' | 'right', matchLen?: number): Element => {
+      const gapToStudents = 12
+      const base = { ...e, rotation: 90 }
+      const studentsSpan = Math.max(160, (maxB - minY) + 2 * gapToStudents)
+      base.w = Math.min(Math.max(160, studentsSpan), Math.max(160, frameSize.h - 2 * margin))
+      if (typeof matchLen === 'number') base.w = matchLen
+      const thickness = base.h
+      const centerY = (minY + maxB) / 2
+      if (side === 'left') {
+        const extraGap = (e.type === 'WINDOW_SIDE') ? 4 : 0
+        let centerX = margin + (thickness / 2)
+        centerX = Math.max(centerX, (minX - (gapToStudents + extraGap) - (thickness / 2)))
+        centerX = Math.max(thickness / 2, Math.min(frameSize.w - thickness / 2, centerX))
+        return { ...base, x: centerX - base.w / 2, y: Math.max(0, Math.min(frameSize.h - base.h, centerY - base.h / 2)) }
+      } else {
+        let centerX = frameSize.w - margin - (thickness / 2)
+        centerX = Math.min(centerX, (maxR + gapToStudents + (thickness / 2)))
+        centerX = Math.max(thickness / 2, Math.min(frameSize.w - thickness / 2, centerX))
+        return { ...base, x: centerX - base.w / 2, y: Math.max(0, Math.min(frameSize.h - base.h, centerY - base.h / 2)) }
+      }
+    }
+
+    const shouldWindowBeLeft = !roomNameStartsWithW
+    let matchLen: number | undefined
+
+    // Deterministic sides for window/wall, independent of creation order
+    const windows = elements.filter(e => e.type === 'WINDOW_SIDE')
+    const walls = elements.filter(e => e.type === 'WALL_SIDE')
+    if (windows.length > 0) {
+      const w0 = placeSideBar(windows[0], shouldWindowBeLeft ? 'left' : 'right', matchLen)
+      matchLen = w0.w
+      elements[elements.findIndex(e => e.id === windows[0].id)] = w0
+    }
+    if (walls.length > 0) {
+      const w0 = placeSideBar(walls[0], shouldWindowBeLeft ? 'right' : 'left', matchLen)
+      matchLen = w0.w
+      elements[elements.findIndex(e => e.id === walls[0].id)] = w0
+    }
+
+    // Place teacher after side bars
+    const teachers = elements.filter(e => e.type === 'TEACHER_DESK')
+    let teacherPlaced: Element | null = null
+    if (teachers.length > 0) {
+      let t0 = placeTeacher(teachers[0])
+      // W‑Räume: Lehrer direkt unter die Wand (gleiche Reihe wie Tür), x am Zentrum der Wand
+      if (roomNameStartsWithW) {
+        const wallBar = elements.find(e => e.type === 'WALL_SIDE')
+        if (wallBar) {
+          const centerX = wallBar.x + wallBar.w / 2
+          const avgH = students.reduce((a, s) => a + s.h, 0) / students.length
+          const tol = Math.max(24, 0.6 * avgH)
+          const firstRow = students.filter(s => s.y <= minY + tol)
+          const firstRowBottom = Math.max(...firstRow.map(s => s.y + s.h))
+          const targetY = Math.min(frameSize.h - t0.h - margin, firstRowBottom + strongGap)
+          t0 = { ...t0, x: Math.max(margin, Math.min(frameSize.w - margin - t0.w, centerX - t0.w / 2)), y: targetY }
+        }
+      }
+      const idx = elements.findIndex(e => e.id === teachers[0].id)
+      elements[idx] = t0
+      teacherPlaced = t0
+    }
+    // Update obstacles before placing doors
+    obstacles = buildObstacles(elements)
+
+    // Doors opposite to teacher, same row
+    const doors = elements.filter(e => e.type === 'DOOR')
+    for (const d of doors) {
+      let dd = placeDoorOppositeTeacher(d, teacherPlaced)
+      // W‑Räume: Tür direkt unter das Fenster (gleiche y wie Lehrer), x am Zentrum des Fensters
+      if (roomNameStartsWithW && teacherPlaced) {
+        const winBar = elements.find(e => e.type === 'WINDOW_SIDE')
+        if (winBar) {
+          const centerX = winBar.x + winBar.w / 2
+          dd = { ...dd, x: Math.max(margin, Math.min(frameSize.w - margin - dd.w, centerX - dd.w / 2)), y: teacherPlaced.y }
+        }
+      }
+      elements[elements.findIndex(e => e.id === d.id)] = dd
+    }
+
+    // FINAL override for W-rooms: keep it dead simple and deterministic.
+    if (roomNameStartsWithW) {
+      const wall = elements.find(e => e.type === 'WALL_SIDE')
+      const win = elements.find(e => e.type === 'WINDOW_SIDE')
+      const teacher = elements.find(e => e.type === 'TEACHER_DESK')
+      const door = elements.find(e => e.type === 'DOOR')
+      if (teacher || door) {
+        const firstRow = students.filter(s => s.y <= minY + Math.max(24, 0.6 * (students.reduce((a, s) => a + s.h, 0) / students.length)))
+        const firstRowBottom = firstRow.length ? Math.max(...firstRow.map(s => s.y + s.h)) : maxB
+        const rowY = Math.min(
+          frameSize.h - Math.max(teacher?.h ?? 80, door?.h ?? 32) - margin,
+          firstRowBottom + strongGap,
+        )
+        if (teacher && wall) {
+          const cx = wall.x + wall.w / 2
+          const nx = Math.max(margin, Math.min(frameSize.w - margin - teacher.w, cx - teacher.w / 2))
+          const idx = elements.findIndex(e => e.id === teacher.id)
+          elements[idx] = { ...teacher, x: nx, y: rowY }
+        }
+        if (door && win) {
+          const cx = win.x + win.w / 2
+          const nx = Math.max(margin, Math.min(frameSize.w - margin - door.w, cx - door.w / 2))
+          const idx = elements.findIndex(e => e.id === door.id)
+          elements[idx] = { ...door, x: nx, y: rowY }
+        }
+      }
+    }
+
+    // Normalize z-order: non-students below students, deterministic within types
+    const nonStudents = elements.filter(e => e.type !== 'STUDENT')
+    const studentsList = elements.filter(e => e.type === 'STUDENT')
+    // Order non-students by type priority for stable z
+    const typePriority: Record<ElementType, number> = {
+      WINDOW_SIDE: 1 as any,
+      WALL_SIDE: 2 as any,
+      DOOR: 3 as any,
+      TEACHER_DESK: 4 as any,
+      STUDENT: 5,
+    }
+    nonStudents.sort((a, b) => (typePriority[a.type] ?? 100) - (typePriority[b.type] ?? 100))
+    let zc = 1
+    for (const e of nonStudents) e.z = zc++
+    for (const e of studentsList) e.z = zc++
+
+    return [...nonStudents, ...studentsList]
+  }
+
   const applyPairsLayout = () => {
     if (readOnly) return
     // constants for simple, tight pairs
     const seatW = 120
     const seatH = 70
+    // Inner margins: for W-rooms, align first/last column to exactly G from bars
     const marginX = 40
     const marginY = 60
-    const betweenPairsX = 24 // small aisle between pairs
+    const betweenPairsX = 24 // default gutter (will be recomputed for W rooms)
     const betweenRowsY = 24
 
     // Determine how many seats to layout: prefer loaded students count, fallback to existing seat count
@@ -161,7 +495,21 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     const newSeats: Element[] = []
     let pairIndex = 0
     for (let r = 0; r < rows; r++) {
-      let x = marginX
+      // For W-rooms, compute gutters to exactly fill inner band (left/right gaps == G)
+      let x: number
+      let gutter = betweenPairsX
+      if (roomNameStartsWithW) {
+        const BAR_DEFAULT = 32; const G = 12; const OUTER = 16
+        const wall = elements.find(e => e.type === 'WALL_SIDE')
+        const win = elements.find(e => e.type === 'WINDOW_SIDE')
+        const leftBand = OUTER + (wall ? (wall.h || BAR_DEFAULT) : BAR_DEFAULT) + G
+        const rightBand = OUTER + (win ? (win.h || BAR_DEFAULT) : BAR_DEFAULT) + G
+        const availInner = Math.max(0, frameSize.w - leftBand - rightBand)
+        gutter = perRow > 1 ? Math.max(0, (availInner - perRow * pairWidth) / (perRow - 1)) : 0
+        x = leftBand
+      } else {
+        x = marginX
+      }
       const y = marginY + r * (seatH + betweenRowsY)
       for (let c = 0; c < perRow; c++) {
         if (pairIndex >= pairCount) break
@@ -175,7 +523,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
 
         newSeats.push(leftSeat, rightSeat)
         pairIndex++
-        x += pairWidth + betweenPairsX
+        x += pairWidth + gutter
       }
     }
 
@@ -187,11 +535,8 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       return e
     })
 
-    // replace existing student elements; keep others
-    setElements(prev => {
-      const kept = prev.filter(e => e.type !== 'STUDENT')
-      return [...kept, ...assignedSeats]
-    })
+    // replace existing student elements; keep others and then realign fixed elements
+    setElements(prev => realignFixedElements([...prev.filter(e => e.type !== 'STUDENT'), ...assignedSeats]))
     scheduleSave()
   }
 
@@ -232,7 +577,23 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         rightPairSpanX = 2 * seatW
         totalW = leftPairSpanX + betweenGroupsX + (4 * seatW) + betweenGroupsX + rightPairSpanX
       }
-      const startX = Math.max(marginX, Math.floor((frameSize.w - totalW) / 2))
+      let startX: number
+      let gapBetweenGroups = betweenGroupsX
+      if (roomNameStartsWithW) {
+        const BAR_DEFAULT = 32; const G = 12; const OUTER = 16
+        const wall = elements.find(e => e.type === 'WALL_SIDE')
+        const win = elements.find(e => e.type === 'WINDOW_SIDE')
+        const leftBand = OUTER + (wall ? (wall.h || BAR_DEFAULT) : BAR_DEFAULT) + G
+        const rightBand = OUTER + (win ? (win.h || BAR_DEFAULT) : BAR_DEFAULT) + G
+        const availInner = Math.max(0, frameSize.w - leftBand - rightBand)
+        const blocksW = leftPairSpanX + (4 * seatW) + rightPairSpanX
+        const free = Math.max(0, availInner - blocksW)
+        gapBetweenGroups = free / 2
+        startX = leftBand
+      } else {
+        const availInner = frameSize.w
+        startX = Math.max(marginX, Math.floor((availInner - totalW) / 2))
+      }
       // Left pair
       const leftPairX = startX
       // build left pair with exact edge-to-edge when angled
@@ -256,13 +617,13 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       lpA.meta = { ...(lpA.meta||{}), joints: add(lpA.meta?.joints, { otherId: lpB.id, side: 'right', t: 0.5, kind: 'pair', pairId: lPairId }) }
       lpB.meta = { ...(lpB.meta||{}), joints: add(lpB.meta?.joints, { otherId: lpA.id, side: 'left', t: 0.5, kind: 'pair', pairId: lPairId }) }
       // Center 4
-      const centerX = leftPairX + leftPairSpanX + betweenGroupsX
+      const centerX = leftPairX + leftPairSpanX + gapBetweenGroups
       const c1: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 0 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 2, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
       const c2: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 1 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 3, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
       const c3: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 2 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 4, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
       const c4: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 3 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 5, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
       // Right pair
-      const rightPairX = centerX + 4 * seatW + betweenGroupsX
+      const rightPairX = centerX + 4 * seatW + gapBetweenGroups
       const rightAngle = angled ? 10 : 0
       const rpA: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: rightPairX, y, w: seatW, h: seatH, rotation: rightAngle, z: newSeats.length + 6, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
       let rpB_x = rightPairX + seatW
@@ -293,10 +654,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       if (prevSeat) return { ...e, refId: prevSeat.refId ?? null }
       return e
     })
-    setElements(prev => {
-      const kept = prev.filter(e => e.type !== 'STUDENT')
-      return [...kept, ...assigned]
-    })
+    setElements(prev => realignFixedElements([...prev.filter(e => e.type !== 'STUDENT'), ...assigned]))
     scheduleSave()
   }
 
@@ -306,7 +664,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     const seatH = 70
     const marginX = 40
     const marginY = 40
-    const between = 16 // small spacing between consecutive seats in a run
+    let between = 16 // will recompute for W rooms
     const downGap = 24 // vertical gap between rows/columns
 
     const nStudents = students.length
@@ -319,11 +677,28 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       newSeats.push({ id: uid('el'), type: 'STUDENT', refId: null, x, y, w: seatW, h: seatH, rotation: rot, z: newSeats.length, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } })
     }
     // Compute top run capacity (prefer 8 if space, else max that fits)
-    const availW = frameSize.w - 2 * marginX
+    let leftBandW = marginX
+    let rightBandW = marginX
+    let availW = (frameSize.w - 2 * marginX)
+    if (roomNameStartsWithW) {
+      const BAR_DEFAULT = 32; const G = 12; const OUTER = 16
+      const wall = elements.find(e => e.type === 'WALL_SIDE')
+      const win = elements.find(e => e.type === 'WINDOW_SIDE')
+      leftBandW = OUTER + (wall ? (wall.h || BAR_DEFAULT) : BAR_DEFAULT) + G
+      rightBandW = OUTER + (win ? (win.h || BAR_DEFAULT) : BAR_DEFAULT) + G
+      availW = frameSize.w - leftBandW - rightBandW
+    }
     const perTop = Math.max(4, Math.min(10, Math.floor((availW + between) / (seatW + between))))
     // Place top run centered
     const totalTopW = perTop * seatW + (perTop - 1) * between
-    const startTopX = Math.max(marginX, Math.floor((frameSize.w - totalTopW) / 2))
+    let startTopX: number
+    if (roomNameStartsWithW) {
+      // fill inner band exactly: recompute between so first seat starts at leftBand, last ends at rightBand
+      between = perTop > 1 ? Math.max(0, (availW - perTop * seatW) / (perTop - 1)) : 0
+      startTopX = leftBandW
+    } else {
+      startTopX = Math.max(marginX, Math.floor((frameSize.w - totalTopW) / 2))
+    }
     const topY = marginY
     let used = 0
     for (let i = 0; i < perTop && used < n; i++) {
@@ -338,14 +713,14 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       if (newSeats[midR]) newSeats[midR] = { ...newSeats[midR], y: newSeats[midR].y + Math.floor(seatH * 0.4) }
     }
     // Left column downward
-    const leftX = marginX
+    const leftX = roomNameStartsWithW ? leftBandW : marginX
     for (let k = 0; used < n && k < 50; k++) {
       const y = topY + seatH + downGap + k * (seatH + downGap)
       addSeat(leftX, y, 0)
       used++
     }
     // Right column downward
-    const rightX = frameSize.w - marginX - seatW
+    const rightX = roomNameStartsWithW ? (frameSize.w - rightBandW - seatW) : (frameSize.w - marginX - seatW)
     for (let k = 0; used < n && k < 50; k++) {
       const y = topY + seatH + downGap + k * (seatH + downGap)
       addSeat(rightX, y, 0)
@@ -359,10 +734,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       if (prevSeat) return { ...e, refId: prevSeat.refId ?? null }
       return e
     })
-    setElements(prev => {
-      const kept = prev.filter(e => e.type !== 'STUDENT')
-      return [...kept, ...assigned]
-    })
+    setElements(prev => realignFixedElements([...prev.filter(e => e.type !== 'STUDENT'), ...assigned]))
     scheduleSave()
   }
 
@@ -1289,7 +1661,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       if (!at) {
         const margin = 16
         const strongGap = 28
-        // prefer aligning with teacher row if possible
+        // align with teacher row if possible; Tür unter rechtester Schülerspalte
         const teacher = elements.find(e => e.type === 'TEACHER_DESK') || null
         const studs = elements.filter(e => e.type === 'STUDENT')
         let targetY: number
@@ -1330,60 +1702,97 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
         const forbiddenXIntervals = (y: number): Array<[number, number]> => {
           const T = y, B = y + base.h
           const acc: Array<[number, number]> = []
-          for (const b of obstacles) {
-            if (B <= b.top || T >= b.bottom) continue
-            acc.push([b.left - base.w, b.right])
-          }
+          for (const b of obstacles) { if (!(B <= b.top || T >= b.bottom)) acc.push([b.left - base.w, b.right]) }
           acc.sort((a,b) => a[0] - b[0])
           const merged: Array<[number, number]> = []
-          for (const iv of acc) {
-            if (!merged.length || iv[0] > merged[merged.length - 1][1]) merged.push([iv[0], iv[1]])
-            else merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1])
-          }
+          for (const iv of acc) { if (!merged.length || iv[0] > merged[merged.length - 1][1]) merged.push([iv[0], iv[1]]); else merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1]) }
           return merged
+        }
+        const tryLeftmostAtY = (y: number): number | null => {
+          const merged = forbiddenXIntervals(y)
+          let x = xDomainL
+          for (const [s, e] of merged) { if (x < s) break; x = Math.max(x, e) }
+          return x <= xDomainR ? x : null
         }
         const tryRightmostAtY = (y: number): number | null => {
           const merged = forbiddenXIntervals(y)
-          // derive allowed gaps within [xDomainL, xDomainR]
           let cur = xDomainL
           const gaps: Array<[number, number]> = []
-          for (const [s, e] of merged) {
-            if (e <= xDomainL) { cur = Math.max(cur, e); continue }
-            if (s > xDomainR) break
-            if (s > cur) gaps.push([cur, Math.min(s, xDomainR)])
-            cur = Math.max(cur, e)
-          }
+          for (const [s, e] of merged) { if (e <= xDomainL) { cur = Math.max(cur, e); continue } if (s > xDomainR) break; if (s > cur) gaps.push([cur, Math.min(s, xDomainR)]); cur = Math.max(cur, e) }
           if (cur < xDomainR) gaps.push([cur, xDomainR])
           if (gaps.length === 0) return null
           const [gL, gR] = gaps[gaps.length - 1]
           const px = gR - base.w
           return px >= gL ? px : null
         }
-        // Prefer same row (targetY), else scan towards bottom
+        // gewünschte X‑Ausrichtung: in W‑Räumen direkt unter dem Fenster, sonst rechteste Sitzspalte
+        let desiredX: number
+        if (roomNameStartsWithW) {
+          const win = elements.find(e => e.type === 'WINDOW_SIDE')
+          if (win) desiredX = (win.x + win.w / 2) - base.w / 2; else {
+            const firstRow = studs.filter(s => s.y <= (Math.min(...studs.map(s => s.y)) + Math.max(24, 0.6 * (studs.reduce((a, s) => a + s.h, 0) / studs.length))))
+            const rightSeat = firstRow.reduce((m, s) => (s.x > m.x ? s : m), firstRow[0] ?? studs[0])
+            desiredX = rightSeat.x + rightSeat.w / 2 - base.w / 2
+          }
+        } else {
+          const firstRow = studs.filter(s => s.y <= (Math.min(...studs.map(s => s.y)) + Math.max(24, 0.6 * (studs.reduce((a, s) => a + s.h, 0) / studs.length))))
+          const rightSeat = firstRow.reduce((m, s) => (s.x > m.x ? s : m), firstRow[0] ?? studs[0])
+          desiredX = rightSeat.x + rightSeat.w / 2 - base.w / 2
+        }
+        const tryNearestToX = (y: number, desired: number): number | null => {
+          const forbiddenXIntervals = (yy: number): Array<[number, number]> => {
+            const T = yy, B = yy + base.h
+            const acc: Array<[number, number]> = []
+            for (const b of obstacles) { if (!(B <= b.top || T >= b.bottom)) acc.push([b.left - base.w, b.right]) }
+            acc.sort((a,b) => a[0] - b[0])
+            const merged: Array<[number, number]> = []
+            for (const iv of acc) { if (!merged.length || iv[0] > merged[merged.length - 1][1]) merged.push([iv[0], iv[1]]); else merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1]) }
+            return merged
+          }
+          const xDomainL = margin
+          const xDomainR = Math.max(xDomainL, frameSize.w - margin - base.w)
+          const merged = forbiddenXIntervals(y)
+          let cur = xDomainL
+          const gaps: Array<[number, number]> = []
+          for (const [s, e] of merged) { if (e <= xDomainL) { cur = Math.max(cur, e); continue } if (s > xDomainR) break; if (s > cur) gaps.push([cur, Math.min(s, xDomainR)]); cur = Math.max(cur, e) }
+          if (cur < xDomainR) gaps.push([cur, xDomainR])
+          if (gaps.length === 0) return null
+          let bestX: number | null = null
+          let bestD = Infinity
+          for (const [gL, gR] of gaps) {
+            const px = Math.min(Math.max(desired, gL), gR - base.w)
+            if (px < gL || px > gR - base.w) continue
+            const center = px + base.w / 2
+            const d = Math.abs(center - (desired + base.w / 2))
+            if (d < bestD) { bestD = d; bestX = px }
+          }
+          return bestX
+        }
+        // Prefer gleiche Reihe (targetY), sonst kleiner Scan
         let placed = false
         const yMin = Math.min(targetY, frameSize.h - margin - base.h)
         const yMax = Math.max(yMin, frameSize.h - margin - base.h)
         for (let y = yMin; y <= yMax; y += 6) {
-          const px = tryRightmostAtY(y)
+          const px = tryNearestToX(y, desiredX)
           if (px !== null) { base.x = px; base.y = y; placed = true; break }
         }
         if (!placed) {
           const lastY = frameSize.h - margin - base.h
-          const px = tryRightmostAtY(lastY)
+          const px = tryNearestToX(lastY, desiredX)
           if (px !== null) { base.x = px; base.y = lastY }
-          else { base.x = xDomainR; base.y = lastY }
+          else { base.x = Math.max(margin, Math.min(frameSize.w - margin - base.w, desiredX)); base.y = lastY }
         }
       }
     }
     if (type === 'TEACHER_DESK') {
       base.w = 260; base.h = 80
-      // Position standardmäßig unten links, unter der ersten Schülerreihe mit deutlichem Abstand
+      // Position standardmäßig unter der ersten Schülerreihe mit deutlichem Abstand
       if (!at) {
         const margin = 16
         const strongGap = 28
         const studs = elements.filter(e => e.type === 'STUDENT')
         if (studs.length === 0) {
-          base.x = margin
+          base.x = roomNameStartsWithW ? margin : Math.max(0, frameSize.w - margin - base.w)
           base.y = Math.max(0, frameSize.h - margin - base.h)
         } else {
           const minY = Math.min(...studs.map(s => s.y))
@@ -1431,35 +1840,62 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
           }
           const xDomainL = margin
           const xDomainR = Math.max(xDomainL, frameSize.w - margin - base.w)
-          const tryPlaceAtY = (y: number): number | null => {
-            const intervals = forbiddenXIntervals(y)
-            let x = xDomainL
-            for (const [s, e] of intervals) {
-              if (x >= xDomainR) break
-              if (x < s) break // x liegt in erlaubtem Bereich
-              x = Math.max(x, e)
+          const tryRightmostAtY = (y: number): number | null => {
+            const merged = forbiddenXIntervals(y)
+            let cur = xDomainL
+            const gaps: Array<[number, number]> = []
+            for (const [s, e] of merged) { if (e <= xDomainL) { cur = Math.max(cur, e); continue } if (s > xDomainR) break; if (s > cur) gaps.push([cur, Math.min(s, xDomainR)]); cur = Math.max(cur, e) }
+            if (cur < xDomainR) gaps.push([cur, xDomainR])
+            if (gaps.length === 0) return null
+            const [gL, gR] = gaps[gaps.length - 1]
+            const px = gR - base.w
+            return px >= gL ? px : null
+          }
+          const tryNearestToX = (y: number, desiredX: number): number | null => {
+            const merged = forbiddenXIntervals(y)
+            let cur = xDomainL
+            const gaps: Array<[number, number]> = []
+            for (const [s, e] of merged) { if (e <= xDomainL) { cur = Math.max(cur, e); continue } if (s > xDomainR) break; if (s > cur) gaps.push([cur, Math.min(s, xDomainR)]); cur = Math.max(cur, e) }
+            if (cur < xDomainR) gaps.push([cur, xDomainR])
+            if (gaps.length === 0) return null
+            let bestX: number | null = null
+            let bestD = Infinity
+            for (const [gL, gR] of gaps) {
+              const px = Math.min(Math.max(desiredX, gL), gR - base.w)
+              if (px < gL || px > gR - base.w) continue
+              const center = px + base.w / 2
+              const d = Math.abs(center - (desiredX + base.w / 2))
+              if (d < bestD) { bestD = d; bestX = px }
             }
-            return x <= xDomainR ? x : null
+            return bestX
           }
           // Scan nach unten: bevorzuge Platz nahe targetY, sonst weiter unten
           let placed = false
           const yMin = Math.min(targetY, frameSize.h - margin - base.h)
           const yMax = Math.max(yMin, frameSize.h - margin - base.h)
+          const desiredX = (() => {
+            if (roomNameStartsWithW) {
+              const wall = elements.find(e => e.type === 'WALL_SIDE')
+              if (wall) return (wall.x + wall.w / 2) - base.w / 2
+            }
+            return frameSize.w - margin - base.w // default rightmost
+          })()
           for (let y = yMin; y <= yMax; y += 6) {
-            const px = tryPlaceAtY(y)
+            const px = roomNameStartsWithW ? tryNearestToX(y, desiredX) : tryRightmostAtY(y)
             if (px !== null) { base.x = px; base.y = y; placed = true; break }
           }
           if (!placed) {
             // Fallback: versuche direkt am unteren Rand mit gleicher Logik
             const lastY = frameSize.h - margin - base.h
-            const px = tryPlaceAtY(lastY)
+            const px = roomNameStartsWithW ? tryNearestToX(lastY, desiredX) : tryRightmostAtY(lastY)
             if (px !== null) { base.x = px; base.y = lastY }
-            else { base.x = xDomainL; base.y = lastY }
+            else { base.x = roomNameStartsWithW ? Math.max(margin, Math.min(frameSize.w - margin - base.w, desiredX)) : xDomainR; base.y = lastY }
           }
         }
       }
     }
-    setElements(prev => [...prev, base])
+    // Beim Hinzufügen immer neu ausrichten, damit Reihenfolge egal ist
+    setElements(prev => realignFixedElements([...prev, base]))
     scheduleSave()
   }
 
