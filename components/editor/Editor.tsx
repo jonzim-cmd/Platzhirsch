@@ -467,6 +467,17 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
 
   const applyPairsLayout = () => {
     if (readOnly) return
+    // Ensure fixed infrastructure exists (window, wall, teacher, door)
+    const fixed: Element[] = []
+    const hasWin = elements.some(e => e.type === 'WINDOW_SIDE')
+    const hasWall = elements.some(e => e.type === 'WALL_SIDE')
+    const hasTeacher = elements.some(e => e.type === 'TEACHER_DESK')
+    const hasDoor = elements.some(e => e.type === 'DOOR')
+    const barThickness = Math.max(24, (typeStyles['WALL_SIDE']?.fontSize ?? 20) + 8)
+    if (!hasWin) fixed.push({ id: uid('el'), type: 'WINDOW_SIDE', refId: null, x: 0, y: 0, w: 320, h: barThickness, rotation: 90, z: 1, groupId: null, meta: { fontSize: typeStyles['WALL_SIDE'].fontSize } })
+    if (!hasWall) fixed.push({ id: uid('el'), type: 'WALL_SIDE', refId: null, x: 0, y: 0, w: 320, h: barThickness, rotation: 90, z: 1, groupId: null, meta: { fontSize: typeStyles['WALL_SIDE'].fontSize } })
+    if (!hasTeacher) fixed.push({ id: uid('el'), type: 'TEACHER_DESK', refId: null, x: 0, y: 0, w: 160, h: 80, rotation: 0, z: 1, groupId: null, meta: { fontSize: typeStyles['TEACHER_DESK'].fontSize } })
+    if (!hasDoor) fixed.push({ id: uid('el'), type: 'DOOR', refId: null, x: 0, y: 0, w: 120, h: 32, rotation: 0, z: 1, groupId: null, meta: { fontSize: typeStyles['DOOR'].fontSize } })
     // constants for simple, tight pairs
     const seatW = 120
     const seatH = 70
@@ -532,13 +543,28 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     })
 
     // replace existing student elements; keep others and then realign fixed elements
-    setElements(prev => realignFixedElements([...prev.filter(e => e.type !== 'STUDENT'), ...assignedSeats]))
+    setElements(prev => realignFixedElements([
+      ...prev.filter(e => e.type !== 'STUDENT'),
+      ...fixed,
+      ...assignedSeats,
+    ]))
     scheduleSave()
   }
 
   // New preformatted layouts
   const applySidesPairsCenterFour = (opts?: { angled?: boolean }) => {
     if (readOnly) return
+    // Ensure fixed infrastructure exists (window, wall, teacher, door)
+    const fixed: Element[] = []
+    const hasWin = elements.some(e => e.type === 'WINDOW_SIDE')
+    const hasWall = elements.some(e => e.type === 'WALL_SIDE')
+    const hasTeacher = elements.some(e => e.type === 'TEACHER_DESK')
+    const hasDoor = elements.some(e => e.type === 'DOOR')
+    const barThickness = Math.max(24, (typeStyles['WALL_SIDE']?.fontSize ?? 20) + 8)
+    if (!hasWin) fixed.push({ id: uid('el'), type: 'WINDOW_SIDE', refId: null, x: 0, y: 0, w: 320, h: barThickness, rotation: 90, z: 1, groupId: null, meta: { fontSize: typeStyles['WALL_SIDE'].fontSize } })
+    if (!hasWall) fixed.push({ id: uid('el'), type: 'WALL_SIDE', refId: null, x: 0, y: 0, w: 320, h: barThickness, rotation: 90, z: 1, groupId: null, meta: { fontSize: typeStyles['WALL_SIDE'].fontSize } })
+    if (!hasTeacher) fixed.push({ id: uid('el'), type: 'TEACHER_DESK', refId: null, x: 0, y: 0, w: 160, h: 80, rotation: 0, z: 1, groupId: null, meta: { fontSize: typeStyles['TEACHER_DESK'].fontSize } })
+    if (!hasDoor) fixed.push({ id: uid('el'), type: 'DOOR', refId: null, x: 0, y: 0, w: 120, h: 32, rotation: 0, z: 1, groupId: null, meta: { fontSize: typeStyles['DOOR'].fontSize } })
     const angled = !!opts?.angled
     const seatW = 120
     const seatH = 70
@@ -650,12 +676,27 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       if (prevSeat) return { ...e, refId: prevSeat.refId ?? null }
       return e
     })
-    setElements(prev => realignFixedElements([...prev.filter(e => e.type !== 'STUDENT'), ...assigned]))
+    setElements(prev => realignFixedElements([
+      ...prev.filter(e => e.type !== 'STUDENT'),
+      ...fixed,
+      ...assigned,
+    ]))
     scheduleSave()
   }
 
   const applyHorseshoeLayout = () => {
     if (readOnly) return
+    // Ensure fixed infrastructure exists (window, wall, teacher, door)
+    const fixed: Element[] = []
+    const hasWin = elements.some(e => e.type === 'WINDOW_SIDE')
+    const hasWall = elements.some(e => e.type === 'WALL_SIDE')
+    const hasTeacher = elements.some(e => e.type === 'TEACHER_DESK')
+    const hasDoor = elements.some(e => e.type === 'DOOR')
+    const barThickness = Math.max(24, (typeStyles['WALL_SIDE']?.fontSize ?? 20) + 8)
+    if (!hasWin) fixed.push({ id: uid('el'), type: 'WINDOW_SIDE', refId: null, x: 0, y: 0, w: 320, h: barThickness, rotation: 90, z: 1, groupId: null, meta: { fontSize: typeStyles['WALL_SIDE'].fontSize } })
+    if (!hasWall) fixed.push({ id: uid('el'), type: 'WALL_SIDE', refId: null, x: 0, y: 0, w: 320, h: barThickness, rotation: 90, z: 1, groupId: null, meta: { fontSize: typeStyles['WALL_SIDE'].fontSize } })
+    if (!hasTeacher) fixed.push({ id: uid('el'), type: 'TEACHER_DESK', refId: null, x: 0, y: 0, w: 160, h: 80, rotation: 0, z: 1, groupId: null, meta: { fontSize: typeStyles['TEACHER_DESK'].fontSize } })
+    if (!hasDoor) fixed.push({ id: uid('el'), type: 'DOOR', refId: null, x: 0, y: 0, w: 120, h: 32, rotation: 0, z: 1, groupId: null, meta: { fontSize: typeStyles['DOOR'].fontSize } })
     const seatW = 120
     const seatH = 70
     const marginX = 40
@@ -743,7 +784,11 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       if (prevSeat) return { ...e, refId: prevSeat.refId ?? null }
       return e
     })
-    setElements(prev => realignFixedElements([...prev.filter(e => e.type !== 'STUDENT'), ...assigned]))
+    setElements(prev => realignFixedElements([
+      ...prev.filter(e => e.type !== 'STUDENT'),
+      ...fixed,
+      ...assigned,
+    ]))
     scheduleSave()
   }
 
