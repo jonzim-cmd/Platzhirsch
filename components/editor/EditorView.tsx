@@ -235,6 +235,7 @@ export function EditorView({ ctx }: { ctx: any }) {
                 onDragStart={(e: any) => {
                   // keine Shortcut-Gesten: immer Gruppenbewegung, kein Detach-on-drag
                   ctx.detachOnDragRef.current = false
+                  ctx.markManual?.()
                   ;(window as any).__lastMoveableEvent = e.inputEvent
                   if (!primarySelectedId) return
                   const byId: Map<string, any> = new Map(elements.map((el: any) => [el.id, el]))
@@ -258,7 +259,7 @@ export function EditorView({ ctx }: { ctx: any }) {
                   }
                 }}
                 onDragEnd={() => { if (primarySelectedId) { onDragEnd(primarySelectedId, { detach: ctx.detachOnDragRef.current }) } }}
-                onResizeStart={(e: any) => { e.setKeepRatio?.(e.inputEvent?.shiftKey === true) }}
+                onResizeStart={(e: any) => { ctx.markManual?.(); e.setKeepRatio?.(e.inputEvent?.shiftKey === true) }}
                 onResize={ctx.onMoveableResize}
                 onResizeEnd={() => scheduleSave()}
                 onRotate={(e: any) => { if (!primarySelectedId) return; setElements((prev: any) => prev.map((x: any) => x.id === primarySelectedId ? { ...x, rotation: e.beforeRotate } : x)) }}
@@ -296,11 +297,14 @@ export function EditorView({ ctx }: { ctx: any }) {
         <div className="rounded border border-neutral-900 p-3">
           <div className="text-sm font-medium mb-2">Palette</div>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => addElement('TEACHER_DESK')}>Lehrerpult</Button>
+            <Button onClick={() => addElement('TEACHER_DESK')}>Lehrer</Button>
             <Button onClick={() => addElement('DOOR')}>Tür</Button>
             <Button onClick={() => addElement('WINDOW_SIDE')}>Fenster</Button>
             <Button onClick={() => addElement('WALL_SIDE')}>Wand</Button>
-            <Button onClick={applyPairsLayout} variant="primary">Paare-Layout anwenden</Button>
+            <Button onClick={applyPairsLayout} variant="primary">Paare</Button>
+            <Button onClick={ctx.applySidesPairsCenterFour}>Seiten-Paare + Mitte 4er</Button>
+            <Button onClick={ctx.applySidesPairsCenterFourAngled}>Seiten-Paare (schräg) + Mitte 4er</Button>
+            <Button onClick={ctx.applyHorseshoeLayout}>Hufeisen</Button>
           </div>
         </div>
         <div className="rounded border border-neutral-900 p-3">

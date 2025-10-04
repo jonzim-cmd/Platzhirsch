@@ -149,12 +149,12 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     // Determine how many seats to layout: prefer loaded students count, fallback to existing seat count
     const existingSeats = elements.filter(e => e.type === 'STUDENT')
     const nStudents = students.length
-    const n = Math.max(nStudents, existingSeats.length)
+    const n = nStudents > 0 ? nStudents : existingSeats.length
     if (n === 0) return
 
     const pairWidth = seatW * 2 // tight: no gap inside pair
-    const availW = Math.max(0, frameSize.w - marginX * 2)
-    const perRow = Math.max(1, Math.floor((availW + betweenPairsX) / (pairWidth + betweenPairsX)))
+    // Always 4 columns (of pairs) per row, rows as needed
+    const perRow = 4
     const pairCount = Math.ceil(n / 2)
     const rows = Math.ceil(pairCount / perRow)
 
@@ -191,6 +191,177 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     setElements(prev => {
       const kept = prev.filter(e => e.type !== 'STUDENT')
       return [...kept, ...assignedSeats]
+    })
+    scheduleSave()
+  }
+
+  // New preformatted layouts
+  const applySidesPairsCenterFour = (opts?: { angled?: boolean }) => {
+    if (readOnly) return
+    const angled = !!opts?.angled
+    const seatW = 120
+    const seatH = 70
+    const marginX = 40
+    const marginY = 60
+    const betweenRowsY = 24
+    const betweenGroupsX = 48 // gap between left-pair, center-4, right-pair blocks
+
+    const nStudents = students.length
+    const existingSeats = elements.filter(e => e.type === 'STUDENT')
+    const n = nStudents > 0 ? nStudents : existingSeats.length
+    if (n === 0) return
+
+    const perRowSeats = 8 // 2 (pair) + 4 + 2 (pair)
+    const rows = Math.ceil(n / perRowSeats)
+    const newSeats: Element[] = []
+
+    const deg2rad = (deg: number) => (deg * Math.PI) / 180
+    for (let r = 0, used = 0; r < rows && used < n; r++) {
+      const y = marginY + r * (seatH + betweenRowsY)
+      // Compute total width of one row to center horizontally
+      let totalW: number
+      let leftPairSpanX: number
+      let rightPairSpanX: number
+      if (angled) {
+        const cos = Math.cos(deg2rad(10))
+        leftPairSpanX = seatW + seatW * cos
+        rightPairSpanX = seatW + seatW * cos
+        totalW = leftPairSpanX + betweenGroupsX + (4 * seatW) + betweenGroupsX + rightPairSpanX
+      } else {
+        leftPairSpanX = 2 * seatW
+        rightPairSpanX = 2 * seatW
+        totalW = leftPairSpanX + betweenGroupsX + (4 * seatW) + betweenGroupsX + rightPairSpanX
+      }
+      const startX = Math.max(marginX, Math.floor((frameSize.w - totalW) / 2))
+      // Left pair
+      const leftPairX = startX
+      // build left pair with exact edge-to-edge when angled
+      const leftAngle = angled ? -10 : 0
+      const lpA: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: leftPairX, y, w: seatW, h: seatH, rotation: leftAngle, z: newSeats.length, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      let lpB_x = leftPairX + seatW
+      let lpB_y = y
+      if (angled) {
+        const cx = lpA.x + seatW / 2
+        const cy = lpA.y + seatH / 2
+        const dx = seatW * Math.cos(deg2rad(leftAngle))
+        const dy = seatW * Math.sin(deg2rad(leftAngle))
+        const rcx = cx + dx
+        const rcy = cy + dy
+        lpB_x = rcx - seatW / 2
+        lpB_y = rcy - seatH / 2
+      }
+      const lpB: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: lpB_x, y: lpB_y, w: seatW, h: seatH, rotation: leftAngle, z: newSeats.length + 1, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      const add = (arr: any[]|undefined, item:any)=>Array.isArray(arr)?[...arr,item]:[item]
+      const lPairId = uid('pair')
+      lpA.meta = { ...(lpA.meta||{}), joints: add(lpA.meta?.joints, { otherId: lpB.id, side: 'right', t: 0.5, kind: 'pair', pairId: lPairId }) }
+      lpB.meta = { ...(lpB.meta||{}), joints: add(lpB.meta?.joints, { otherId: lpA.id, side: 'left', t: 0.5, kind: 'pair', pairId: lPairId }) }
+      // Center 4
+      const centerX = leftPairX + leftPairSpanX + betweenGroupsX
+      const c1: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 0 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 2, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      const c2: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 1 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 3, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      const c3: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 2 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 4, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      const c4: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 3 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 5, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      // Right pair
+      const rightPairX = centerX + 4 * seatW + betweenGroupsX
+      const rightAngle = angled ? 10 : 0
+      const rpA: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: rightPairX, y, w: seatW, h: seatH, rotation: rightAngle, z: newSeats.length + 6, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      let rpB_x = rightPairX + seatW
+      let rpB_y = y
+      if (angled) {
+        const cx = rpA.x + seatW / 2
+        const cy = rpA.y + seatH / 2
+        const dx = seatW * Math.cos(deg2rad(rightAngle))
+        const dy = seatW * Math.sin(deg2rad(rightAngle))
+        const rcx = cx + dx
+        const rcy = cy + dy
+        rpB_x = rcx - seatW / 2
+        rpB_y = rcy - seatH / 2
+      }
+      const rpB: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: rpB_x, y: rpB_y, w: seatW, h: seatH, rotation: rightAngle, z: newSeats.length + 7, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      const rPairId = uid('pair')
+      rpA.meta = { ...(rpA.meta||{}), joints: add(rpA.meta?.joints, { otherId: rpB.id, side: 'right', t: 0.5, kind: 'pair', pairId: rPairId }) }
+      rpB.meta = { ...(rpB.meta||{}), joints: add(rpB.meta?.joints, { otherId: rpA.id, side: 'left', t: 0.5, kind: 'pair', pairId: rPairId }) }
+
+      const rowSeats = [lpA, lpB, c1, c2, c3, c4, rpA, rpB]
+      for (const s of rowSeats) { if (used < n) { newSeats.push(s); used++ } }
+    }
+
+    // Assign refIds: first loaded students, then keep any existing refIds if present
+    const assigned = newSeats.map((e, i) => {
+      if (i < nStudents) return { ...e, refId: students[i].id }
+      const prevSeat = existingSeats[i]
+      if (prevSeat) return { ...e, refId: prevSeat.refId ?? null }
+      return e
+    })
+    setElements(prev => {
+      const kept = prev.filter(e => e.type !== 'STUDENT')
+      return [...kept, ...assigned]
+    })
+    scheduleSave()
+  }
+
+  const applyHorseshoeLayout = () => {
+    if (readOnly) return
+    const seatW = 120
+    const seatH = 70
+    const marginX = 40
+    const marginY = 40
+    const between = 16 // small spacing between consecutive seats in a run
+    const downGap = 24 // vertical gap between rows/columns
+
+    const nStudents = students.length
+    const existingSeats = elements.filter(e => e.type === 'STUDENT')
+    const n = nStudents > 0 ? nStudents : existingSeats.length
+    if (n === 0) return
+
+    const newSeats: Element[] = []
+    const addSeat = (x: number, y: number, rot = 0) => {
+      newSeats.push({ id: uid('el'), type: 'STUDENT', refId: null, x, y, w: seatW, h: seatH, rotation: rot, z: newSeats.length, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } })
+    }
+    // Compute top run capacity (prefer 8 if space, else max that fits)
+    const availW = frameSize.w - 2 * marginX
+    const perTop = Math.max(4, Math.min(10, Math.floor((availW + between) / (seatW + between))))
+    // Place top run centered
+    const totalTopW = perTop * seatW + (perTop - 1) * between
+    const startTopX = Math.max(marginX, Math.floor((frameSize.w - totalTopW) / 2))
+    const topY = marginY
+    let used = 0
+    for (let i = 0; i < perTop && used < n; i++) {
+      addSeat(startTopX + i * (seatW + between), topY)
+      used++
+    }
+    // Nudge two middle seats downward to protrude into center (if available)
+    if (newSeats.length >= 2) {
+      const midL = Math.floor((newSeats.length - 1) / 2)
+      const midR = Math.ceil((newSeats.length - 1) / 2)
+      if (newSeats[midL]) newSeats[midL] = { ...newSeats[midL], y: newSeats[midL].y + Math.floor(seatH * 0.4) }
+      if (newSeats[midR]) newSeats[midR] = { ...newSeats[midR], y: newSeats[midR].y + Math.floor(seatH * 0.4) }
+    }
+    // Left column downward
+    const leftX = marginX
+    for (let k = 0; used < n && k < 50; k++) {
+      const y = topY + seatH + downGap + k * (seatH + downGap)
+      addSeat(leftX, y, 0)
+      used++
+    }
+    // Right column downward
+    const rightX = frameSize.w - marginX - seatW
+    for (let k = 0; used < n && k < 50; k++) {
+      const y = topY + seatH + downGap + k * (seatH + downGap)
+      addSeat(rightX, y, 0)
+      used++
+    }
+
+    // Assign refIds consistently
+    const assigned = newSeats.map((e, i) => {
+      if (i < nStudents) return { ...e, refId: students[i].id }
+      const prevSeat = existingSeats[i]
+      if (prevSeat) return { ...e, refId: prevSeat.refId ?? null }
+      return e
+    })
+    setElements(prev => {
+      const kept = prev.filter(e => e.type !== 'STUDENT')
+      return [...kept, ...assigned]
     })
     scheduleSave()
   }
@@ -251,7 +422,7 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   }
 
   const defaultTerms: Record<Exclude<ElementType, 'STUDENT'>, string> = {
-    TEACHER_DESK: 'Lehrerpult',
+    TEACHER_DESK: 'Lehrer',
     DOOR: 'Tür',
     WINDOW_SIDE: 'Fenster',
     WALL_SIDE: 'Wand',
@@ -422,6 +593,11 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
   }, [students])
 
   const readOnly = viewMode === 'lead'
+  const currentRoom = useMemo(() => rooms.find(r => r.id === roomId) || null, [rooms, roomId])
+  const roomNameStartsWithW = useMemo(() => {
+    const n = (currentRoom?.name || '').trim()
+    return n.length > 0 && n[0].toUpperCase() === 'W'
+  }, [currentRoom])
   const usedStudentIds = useMemo(() => {
     const set = new Set<string>()
     for (const e of elements) if (e.type === 'STUDENT' && e.refId) set.add(String(e.refId))
@@ -489,29 +665,66 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       return { px, py }
     })()
 
-    // 1) Swap für WINDOW_SIDE <-> WALL_SIDE (Geometrie-Swap) – nur bei >=50% Überdeckung
+    // 1) Swap für WINDOW_SIDE <-> WALL_SIDE
+    //    a) Primär: Typ-Tausch bei visueller Überdeckung (>=50%) – mit Rotation berücksichtigt
+    //    b) Fallback: Typ-Tausch bei geringer Zentrum-Distanz
     if (srcEl && (srcEl.type === 'WINDOW_SIDE' || srcEl.type === 'WALL_SIDE')) {
       const candidates = elements.filter(e => e.id !== srcEl.id && (e.type === 'WINDOW_SIDE' || e.type === 'WALL_SIDE') && e.type !== srcEl.type)
       let target: Element | null = null
       let bestRatio = 0
-      const srcArea = srcEl.w * srcEl.h
+      const aabb = (el: Element) => {
+        const rot = (((el.rotation || 0) % 360) + 360) % 360
+        const rad = rot * Math.PI / 180
+        const cos = Math.cos(rad)
+        const sin = Math.sin(rad)
+        const bbW = Math.abs(el.w * cos) + Math.abs(el.h * sin)
+        const bbH = Math.abs(el.w * sin) + Math.abs(el.h * cos)
+        const cx = el.x + el.w / 2
+        const cy = el.y + el.h / 2
+        return { left: cx - bbW / 2, top: cy - bbH / 2, right: cx + bbW / 2, bottom: cy + bbH / 2, cx, cy, area: bbW * bbH }
+      }
+      const a0 = aabb(srcEl)
       for (const e of candidates) {
-        const left = Math.max(srcEl.x, e.x)
-        const right = Math.min(srcEl.x + srcEl.w, e.x + e.w)
-        const top = Math.max(srcEl.y, e.y)
-        const bottom = Math.min(srcEl.y + srcEl.h, e.y + e.h)
+        const b0 = aabb(e)
+        const left = Math.max(a0.left, b0.left)
+        const right = Math.min(a0.right, b0.right)
+        const top = Math.max(a0.top, b0.top)
+        const bottom = Math.min(a0.bottom, b0.bottom)
         const area = Math.max(0, right - left) * Math.max(0, bottom - top)
-        const ratio = srcArea > 0 && e.w * e.h > 0 ? (area / Math.min(srcArea, e.w * e.h)) : 0
+        const denom = Math.min(a0.area, b0.area)
+        const ratio = denom > 0 ? (area / denom) : 0
         if (ratio >= 0.5 && ratio > bestRatio) { bestRatio = ratio; target = e }
       }
+      if (!target && candidates.length > 0) {
+        // Fallback: kleinste visuelle Zentren-Distanz
+        let bestD = Infinity
+        const { cx: sx, cy: sy } = a0
+        for (const e of candidates) {
+          const { cx: ex, cy: ey } = aabb(e)
+          const d = Math.hypot(ex - sx, ey - sy)
+          if (d < bestD) { bestD = d; target = e }
+        }
+        // nur sehr nahe Fälle zulassen
+        if (bestD > 48) target = null
+      }
       if (target) {
-        // swap geometry
+        // Typ‑Tausch (Fenster↔Wand) wie bei Studenten-RefId-Tausch:
+        // 1) Typen tauschen
+        // 2) Geometrie der bewegten Elemente auf Startposition zurücksetzen
+        const start = dragStartPositions.current
         setElements(prev => prev.map(e => {
-          if (e.id === srcEl.id) return { ...e, x: target.x, y: target.y, w: target.w, h: target.h, rotation: target.rotation, z: target.z }
-          if (e.id === target.id) return { ...e, x: srcEl.x, y: srcEl.y, w: srcEl.w, h: srcEl.h, rotation: srcEl.rotation, z: srcEl.z }
+          if (e.id === srcEl.id) {
+            const outType = (srcEl.type === 'WINDOW_SIDE' ? 'WALL_SIDE' : 'WINDOW_SIDE')
+            let out = { ...e, type: outType }
+            if (start.size > 0 && start.has(e.id!)) out = { ...out, x: start.get(e.id!)!.x, y: start.get(e.id!)!.y }
+            return out
+          }
+          if (e.id === target!.id) {
+            const outType = (target!.type === 'WINDOW_SIDE' ? 'WALL_SIDE' : 'WINDOW_SIDE')
+            return { ...e, type: outType }
+          }
           return e
         }))
-        
         scheduleSave()
         return
       }
@@ -920,9 +1133,82 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
 
   const addElement = (type: ElementType, refId?: string, at?: { x: number; y: number }) => {
     if (readOnly) return
+    // Manual placement should not trigger the initial auto-center-on-first-content.
+    try { autoCenterDoneRef.current = true } catch {}
     const startX = sidebarOpen ? 320 : 120
     // Larger default sizes to match bigger default font
     const baseFont = typeStyles[type]?.fontSize ?? 20
+    // Special logic: STUDENT seats are always arranged on a grid in pairs
+    if (type === 'STUDENT') {
+      // 1) If a seat without assigned student exists, fill it
+      if (refId) {
+        const emptySeat = elements.find(e => e.type === 'STUDENT' && (e.refId == null))
+        if (emptySeat) {
+          setElements(prev => prev.map(e => e.id === emptySeat.id ? { ...e, refId } : e))
+          scheduleSave()
+          return
+        }
+      }
+      // 2) Otherwise, create a new pair at the next free grid slot
+      const seatW = 120
+      const seatH = 70
+      const marginX = 40
+      const marginY = 60
+      const betweenPairsX = 24
+      const betweenRowsY = 24
+      const pairWidth = seatW * 2
+      const availW = Math.max(0, frameSize.w - marginX * 2)
+      const perRow = Math.max(1, Math.floor((availW + betweenPairsX) / (pairWidth + betweenPairsX)))
+
+      type Box = { left: number; top: number; right: number; bottom: number }
+      const obstacles: Box[] = []
+      for (const el of elements) {
+        // approximate by unrotated AABB for simplicity (we mostly layout unrotated seats)
+        const left = el.x
+        const top = el.y
+        const right = el.x + el.w
+        const bottom = el.y + el.h
+        obstacles.push({ left, top, right, bottom })
+      }
+      const rectsIntersect = (a: Box, b: Box) => !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom)
+      const isFree = (x: number, y: number) => {
+        const r1: Box = { left: x, top: y, right: x + seatW, bottom: y + seatH }
+        const r2: Box = { left: x + seatW, top: y, right: x + seatW + seatW, bottom: y + seatH }
+        for (const ob of obstacles) { if (rectsIntersect(r1, ob) || rectsIntersect(r2, ob)) return false }
+        // inside frame
+        if (x < 0 || y < 0) return false
+        if (x + seatW * 2 > frameSize.w) return false
+        if (y + seatH > frameSize.h) return false
+        return true
+      }
+      let placedX = marginX
+      let placedY = marginY
+      let found = false
+      // scan rows/cols
+      for (let r = 0; r < 100 && !found; r++) {
+        const y = marginY + r * (seatH + betweenRowsY)
+        for (let c = 0; c < perRow; c++) {
+          const x = marginX + c * (pairWidth + betweenPairsX)
+          if (isFree(x, y)) { placedX = x; placedY = y; found = true; break }
+        }
+      }
+      if (!found) {
+        // fallback: place at start margins regardless
+        placedX = marginX
+        placedY = marginY
+      }
+      const pairId = uid('pair')
+      const leftSeat: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: placedX, y: placedY, w: seatW, h: seatH, rotation: 0, z: elements.length, groupId: null, meta: { fontSize: baseFont } }
+      const rightSeat: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: placedX + seatW, y: placedY, w: seatW, h: seatH, rotation: 0, z: elements.length + 1, groupId: null, meta: { fontSize: baseFont } }
+      const add = (arr: any[]|undefined, item:any)=>Array.isArray(arr)?[...arr,item]:[item]
+      leftSeat.meta = { ...(leftSeat.meta||{}), joints: add(leftSeat.meta?.joints, { otherId: rightSeat.id, side: 'right', t: 0.5, kind: 'pair', pairId }) }
+      rightSeat.meta = { ...(rightSeat.meta||{}), joints: add(rightSeat.meta?.joints, { otherId: leftSeat.id, side: 'left', t: 0.5, kind: 'pair', pairId }) }
+      // Assign new student to the first free seat (left by default)
+      if (refId) leftSeat.refId = refId
+      setElements(prev => [...prev, leftSeat, rightSeat])
+      scheduleSave()
+      return
+    }
     const base: Element = { id: uid('el'), type, refId: refId ?? null, x: at?.x ?? startX, y: at?.y ?? 120, w: 120, h: 70, rotation: 0, z: elements.length, groupId: null, meta: { fontSize: baseFont } }
     if (type === 'WINDOW_SIDE' || type === 'WALL_SIDE') {
       // Vertical bar: rotate 90°, thickness = h, length = w
@@ -930,39 +1216,249 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       const gapToStudents = 12
       // ensure enough thickness for rotated label
       base.h = Math.max(24, baseFont + 8)
-      // determine student bounding box if available
-      const studs = elements.filter(e => e.type === 'STUDENT')
-      const minX = studs.length ? Math.min(...studs.map(s => s.x)) : null
-      const maxR = studs.length ? Math.max(...studs.map(s => s.x + s.w)) : null
-      const minY = studs.length ? Math.min(...studs.map(s => s.y)) : null
-      const maxB = studs.length ? Math.max(...studs.map(s => s.y + s.h)) : null
+      // determine bounds for students (preferred) and fallback to overall elements
+      const computeBounds = (list: Element[]) => {
+        if (list.length === 0) return null
+        let minL = Infinity, maxR = -Infinity, minT = Infinity, maxB = -Infinity
+        for (const el of list) {
+          const rot = (((el.rotation || 0) % 360) + 360) % 360
+          const rad = rot * Math.PI / 180
+          const cos = Math.cos(rad)
+          const sin = Math.sin(rad)
+          const bbW = Math.abs(el.w * cos) + Math.abs(el.h * sin)
+          const bbH = Math.abs(el.w * sin) + Math.abs(el.h * cos)
+          const cx = el.x + el.w / 2
+          const cy = el.y + el.h / 2
+          const left = cx - bbW / 2
+          const top = cy - bbH / 2
+          const right = cx + bbW / 2
+          const bottom = cy + bbH / 2
+          if (left < minL) minL = left
+          if (right > maxR) maxR = right
+          if (top < minT) minT = top
+          if (bottom > maxB) maxB = bottom
+        }
+        if (!isFinite(minL) || !isFinite(maxR) || !isFinite(minT) || !isFinite(maxB)) return null
+        return { minL, maxR, minT, maxB }
+      }
+      const studentEls = elements.filter(e => e.type === 'STUDENT')
+      const studBounds = computeBounds(studentEls as any)
+      const allBounds = computeBounds(elements as any)
+      const minX = (studBounds ?? allBounds)?.minL ?? null
+      const maxR = (studBounds ?? allBounds)?.maxR ?? null
+      const minY = (studBounds ?? allBounds)?.minT ?? null
+      const maxB = (studBounds ?? allBounds)?.maxB ?? null
 
       // set a sensible length: span of students or default
       const studentsSpan = (minY !== null && maxB !== null) ? Math.max(160, (maxB - minY) + 2 * gapToStudents) : 320
       base.w = Math.min(Math.max(160, studentsSpan), Math.max(160, frameSize.h - 2 * margin))
+
+      // If counterpart already exists, enforce equal length (gleich lang)
+      const counterpartType: ElementType = type === 'WINDOW_SIDE' ? 'WALL_SIDE' : 'WINDOW_SIDE'
+      const counterpart = elements.find(e => e.type === counterpartType)
+      if (counterpart) base.w = counterpart.w
       base.rotation = 90
 
       // Compute center coordinates to place next to students and close to screen edge
       const thickness = base.h
       const centerY = (minY !== null && maxB !== null) ? (minY + maxB) / 2 : (frameSize.h / 2)
-      if (type === 'WINDOW_SIDE') {
-        // right side: near outer right edge, but not beyond, and at least next to last student
-        const edgeCenterX = frameSize.w - margin - (thickness / 2)
-        const nextToStudentsCenterX = (maxR !== null) ? (maxR + gapToStudents + (thickness / 2)) : edgeCenterX
-        const centerX = Math.min(edgeCenterX, nextToStudentsCenterX)
-        base.x = Math.max(0, centerX - base.w / 2)
-        base.y = Math.max(0, Math.min(frameSize.h - base.h, centerY - base.h / 2))
-      } else {
-        // left side: near outer left edge, but not beyond, and with gap to leftmost students
-        const edgeCenterX = margin + (thickness / 2)
-        const nextToStudentsCenterX = (minX !== null) ? (minX - gapToStudents - (thickness / 2)) : edgeCenterX
-        const centerX = Math.max(edgeCenterX, nextToStudentsCenterX)
-        base.x = Math.max(0, Math.min(frameSize.w - base.w, centerX - base.w / 2))
+      const placeLeft = () => {
+        // Links: nahe linker Rand und mit Abstand zum linkesten Objekt
+        const extraGap = (type === 'WINDOW_SIDE') ? 4 : 0
+        let centerX = margin + (thickness / 2)
+        if (minX !== null) centerX = Math.max(centerX, (minX - (gapToStudents + extraGap) - (thickness / 2)))
+        centerX = Math.max(thickness / 2, Math.min(frameSize.w - thickness / 2, centerX))
+        base.x = centerX - base.w / 2
         base.y = Math.max(0, Math.min(frameSize.h - base.h, centerY - base.h / 2))
       }
+      const placeRight = () => {
+        // Rechts: nahe rechter Rand und mit Abstand zum rechtesten Objekt
+        let centerX = frameSize.w - margin - (thickness / 2)
+        if (maxR !== null) centerX = Math.min(centerX, (maxR + gapToStudents + (thickness / 2)))
+        centerX = Math.max(thickness / 2, Math.min(frameSize.w - thickness / 2, centerX))
+        base.x = centerX - base.w / 2
+        base.y = Math.max(0, Math.min(frameSize.h - base.h, centerY - base.h / 2))
+      }
+      const shouldWindowBeLeft = !roomNameStartsWithW
+      const isLeft = (type === 'WINDOW_SIDE' && shouldWindowBeLeft) || (type === 'WALL_SIDE' && !shouldWindowBeLeft)
+      if (isLeft) placeLeft(); else placeRight()
     }
-    if (type === 'DOOR') { base.w = 48; base.h = 10 }
-    if (type === 'TEACHER_DESK') { base.w = 260; base.h = 80 }
+    if (type === 'DOOR') {
+      // Breiter und höher, damit die Beschriftung vollständig passt
+      base.w = 120; base.h = 32
+      if (!at) {
+        const margin = 16
+        const strongGap = 28
+        // prefer aligning with teacher row if possible
+        const teacher = elements.find(e => e.type === 'TEACHER_DESK') || null
+        const studs = elements.filter(e => e.type === 'STUDENT')
+        let targetY: number
+        if (teacher) {
+          targetY = teacher.y
+        } else if (studs.length > 0) {
+          const minY = Math.min(...studs.map(s => s.y))
+          const avgH = studs.reduce((a, s) => a + s.h, 0) / studs.length
+          const tol = Math.max(24, 0.6 * avgH)
+          const firstRow = studs.filter(s => s.y <= minY + tol)
+          const firstRowBottom = Math.max(...firstRow.map(s => s.y + s.h))
+          targetY = Math.min(frameSize.h - base.h - margin, firstRowBottom + strongGap)
+        } else {
+          targetY = Math.max(0, frameSize.h - margin - base.h)
+        }
+        // Build inflated obstacles with clearances
+        type Box = { left: number; top: number; right: number; bottom: number }
+        const obstacles: Box[] = []
+        for (const el of elements) {
+          const rot = (((el.rotation || 0) % 360) + 360) % 360
+          const rad = rot * Math.PI / 180
+          const cos = Math.cos(rad)
+          const sin = Math.sin(rad)
+          const bbW = Math.abs(el.w * cos) + Math.abs(el.h * sin)
+          const bbH = Math.abs(el.w * sin) + Math.abs(el.h * cos)
+          const cx = el.x + el.w / 2
+          const cy = el.y + el.h / 2
+          let left = cx - bbW / 2
+          let top = cy - bbH / 2
+          let right = cx + bbW / 2
+          let bottom = cy + bbH / 2
+          const clearance = el.type === 'STUDENT' ? 32 : (el.type === 'WINDOW_SIDE' || el.type === 'WALL_SIDE') ? 20 : 12
+          left -= clearance; top -= clearance; right += clearance; bottom += clearance
+          obstacles.push({ left, top, right, bottom })
+        }
+        const xDomainL = margin
+        const xDomainR = Math.max(xDomainL, frameSize.w - margin - base.w)
+        const forbiddenXIntervals = (y: number): Array<[number, number]> => {
+          const T = y, B = y + base.h
+          const acc: Array<[number, number]> = []
+          for (const b of obstacles) {
+            if (B <= b.top || T >= b.bottom) continue
+            acc.push([b.left - base.w, b.right])
+          }
+          acc.sort((a,b) => a[0] - b[0])
+          const merged: Array<[number, number]> = []
+          for (const iv of acc) {
+            if (!merged.length || iv[0] > merged[merged.length - 1][1]) merged.push([iv[0], iv[1]])
+            else merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1])
+          }
+          return merged
+        }
+        const tryRightmostAtY = (y: number): number | null => {
+          const merged = forbiddenXIntervals(y)
+          // derive allowed gaps within [xDomainL, xDomainR]
+          let cur = xDomainL
+          const gaps: Array<[number, number]> = []
+          for (const [s, e] of merged) {
+            if (e <= xDomainL) { cur = Math.max(cur, e); continue }
+            if (s > xDomainR) break
+            if (s > cur) gaps.push([cur, Math.min(s, xDomainR)])
+            cur = Math.max(cur, e)
+          }
+          if (cur < xDomainR) gaps.push([cur, xDomainR])
+          if (gaps.length === 0) return null
+          const [gL, gR] = gaps[gaps.length - 1]
+          const px = gR - base.w
+          return px >= gL ? px : null
+        }
+        // Prefer same row (targetY), else scan towards bottom
+        let placed = false
+        const yMin = Math.min(targetY, frameSize.h - margin - base.h)
+        const yMax = Math.max(yMin, frameSize.h - margin - base.h)
+        for (let y = yMin; y <= yMax; y += 6) {
+          const px = tryRightmostAtY(y)
+          if (px !== null) { base.x = px; base.y = y; placed = true; break }
+        }
+        if (!placed) {
+          const lastY = frameSize.h - margin - base.h
+          const px = tryRightmostAtY(lastY)
+          if (px !== null) { base.x = px; base.y = lastY }
+          else { base.x = xDomainR; base.y = lastY }
+        }
+      }
+    }
+    if (type === 'TEACHER_DESK') {
+      base.w = 260; base.h = 80
+      // Position standardmäßig unten links, unter der ersten Schülerreihe mit deutlichem Abstand
+      if (!at) {
+        const margin = 16
+        const strongGap = 28
+        const studs = elements.filter(e => e.type === 'STUDENT')
+        if (studs.length === 0) {
+          base.x = margin
+          base.y = Math.max(0, frameSize.h - margin - base.h)
+        } else {
+          const minY = Math.min(...studs.map(s => s.y))
+          const avgH = studs.reduce((a, s) => a + s.h, 0) / studs.length
+          const tol = Math.max(24, 0.6 * avgH)
+          const firstRow = studs.filter(s => s.y <= minY + tol)
+          const firstRowBottom = Math.max(...firstRow.map(s => s.y + s.h))
+          // Ziel-y: unter erste Reihe, aber innerhalb des Rahmens
+          const targetY = Math.min(frameSize.h - base.h - margin, firstRowBottom + strongGap)
+          // Sammle alle visuellen, aufgeblasenen AABBs (inkl. Rotation) als Hindernisse
+          type Box = { left: number; top: number; right: number; bottom: number }
+          const obstacles: Box[] = []
+          for (const el of elements) {
+            const rot = (((el.rotation || 0) % 360) + 360) % 360
+            const rad = rot * Math.PI / 180
+            const cos = Math.cos(rad)
+            const sin = Math.sin(rad)
+            const bbW = Math.abs(el.w * cos) + Math.abs(el.h * sin)
+            const bbH = Math.abs(el.w * sin) + Math.abs(el.h * cos)
+            const cx = el.x + el.w / 2
+            const cy = el.y + el.h / 2
+            let left = cx - bbW / 2
+            let top = cy - bbH / 2
+            let right = cx + bbW / 2
+            let bottom = cy + bbH / 2
+            const clearance = el.type === 'STUDENT' ? 32 : (el.type === 'WINDOW_SIDE' || el.type === 'WALL_SIDE') ? 20 : 12
+            left -= clearance; top -= clearance; right += clearance; bottom += clearance
+            obstacles.push({ left, top, right, bottom })
+          }
+          // Verbotene X-Intervalle für eine gegebene Y-Position ableiten
+          const forbiddenXIntervals = (y: number): Array<[number, number]> => {
+            const T = y, B = y + base.h
+            const acc: Array<[number, number]> = []
+            for (const b of obstacles) {
+              if (B <= b.top || T >= b.bottom) continue
+              acc.push([b.left - base.w, b.right])
+            }
+            acc.sort((a,b) => a[0] - b[0])
+            const merged: Array<[number, number]> = []
+            for (const iv of acc) {
+              if (!merged.length || iv[0] > merged[merged.length - 1][1]) merged.push([iv[0], iv[1]])
+              else merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1])
+            }
+            return merged
+          }
+          const xDomainL = margin
+          const xDomainR = Math.max(xDomainL, frameSize.w - margin - base.w)
+          const tryPlaceAtY = (y: number): number | null => {
+            const intervals = forbiddenXIntervals(y)
+            let x = xDomainL
+            for (const [s, e] of intervals) {
+              if (x >= xDomainR) break
+              if (x < s) break // x liegt in erlaubtem Bereich
+              x = Math.max(x, e)
+            }
+            return x <= xDomainR ? x : null
+          }
+          // Scan nach unten: bevorzuge Platz nahe targetY, sonst weiter unten
+          let placed = false
+          const yMin = Math.min(targetY, frameSize.h - margin - base.h)
+          const yMax = Math.max(yMin, frameSize.h - margin - base.h)
+          for (let y = yMin; y <= yMax; y += 6) {
+            const px = tryPlaceAtY(y)
+            if (px !== null) { base.x = px; base.y = y; placed = true; break }
+          }
+          if (!placed) {
+            // Fallback: versuche direkt am unteren Rand mit gleicher Logik
+            const lastY = frameSize.h - margin - base.h
+            const px = tryPlaceAtY(lastY)
+            if (px !== null) { base.x = px; base.y = lastY }
+            else { base.x = xDomainL; base.y = lastY }
+          }
+        }
+      }
+    }
     setElements(prev => [...prev, base])
     scheduleSave()
   }
@@ -1001,6 +1497,71 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
 
   // Export helpers
   const canvasRef = useRef<HTMLDivElement>(null)
+  // Track if we already auto-centered this session to avoid fighting user actions
+  const autoCenterDoneRef = useRef(false)
+  
+  // Center elements helper (horizontally/vertically) using visual bounding boxes
+  const centerAll = (mode: 'x' | 'y' | 'both' = 'x') => {
+    if (readOnly) return
+    if (elements.length === 0) return
+    // compute visual bounds considering rotation
+    let minL = Infinity, maxR = -Infinity, minT = Infinity, maxB = -Infinity
+    for (const el of elements) {
+      const rot = (((el.rotation || 0) % 360) + 360) % 360
+      const rad = rot * Math.PI / 180
+      const cos = Math.cos(rad)
+      const sin = Math.sin(rad)
+      const bbW = Math.abs(el.w * cos) + Math.abs(el.h * sin)
+      const bbH = Math.abs(el.w * sin) + Math.abs(el.h * cos)
+      const cx = el.x + el.w / 2
+      const cy = el.y + el.h / 2
+      const left = cx - bbW / 2
+      const top = cy - bbH / 2
+      const right = cx + bbW / 2
+      const bottom = cy + bbH / 2
+      if (left < minL) minL = left
+      if (right > maxR) maxR = right
+      if (top < minT) minT = top
+      if (bottom > maxB) maxB = bottom
+    }
+    if (!isFinite(minL) || !isFinite(maxR) || !isFinite(minT) || !isFinite(maxB)) return
+    const contentW = Math.max(0, maxR - minL)
+    const contentH = Math.max(0, maxB - minT)
+    const offsetX = (mode === 'x' || mode === 'both') ? ((frameSize.w - contentW) / 2 - minL) : 0
+    const offsetY = (mode === 'y' || mode === 'both') ? ((frameSize.h - contentH) / 2 - minT) : 0
+    if (offsetX === 0 && offsetY === 0) return
+    setElements(prev => prev.map(el => ({ ...el, x: el.x + offsetX, y: el.y + offsetY })))
+    scheduleSave()
+    autoCenterDoneRef.current = true
+  }
+
+  // Default: auto-center horizontally once after load/first content
+  useEffect(() => {
+    if (readOnly) return
+    if (autoCenterDoneRef.current) return
+    if (!elements || elements.length === 0) return
+    // compute visual bounds
+    let minL = Infinity, maxR = -Infinity
+    for (const el of elements) {
+      const rot = (((el.rotation || 0) % 360) + 360) % 360
+      const rad = rot * Math.PI / 180
+      const cos = Math.cos(rad)
+      const sin = Math.sin(rad)
+      const bbW = Math.abs(el.w * cos) + Math.abs(el.h * sin)
+      const cx = el.x + el.w / 2
+      const left = cx - bbW / 2
+      const right = cx + bbW / 2
+      if (left < minL) minL = left
+      if (right > maxR) maxR = right
+    }
+    if (!isFinite(minL) || !isFinite(maxR)) return
+    const contentW = Math.max(0, maxR - minL)
+    const offsetX = ((frameSize.w - contentW) / 2 - minL)
+    if (Math.abs(offsetX) < 0.5) { autoCenterDoneRef.current = true; return }
+    setElements(prev => prev.map(el => ({ ...el, x: el.x + offsetX })))
+    scheduleSave()
+    autoCenterDoneRef.current = true
+  }, [elements, frameSize.w, readOnly])
   
   // Keyboard: copy/paste/select-all/delete
   useEffect(() => {
@@ -1009,6 +1570,25 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
       const target = e.target as HTMLElement | null
       const isEditable = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || (target as any).isContentEditable)
       if (isEditable) return
+      // Arrow keys: nudge selected elements
+      if (
+        (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+      ) {
+        if (readOnly || !primarySelectedId) return
+        e.preventDefault()
+        // Larger default steps; Shift for coarse, Alt for fine
+        const step = e.shiftKey ? 20 : (e.altKey ? 1 : 5)
+        let dx = 0, dy = 0
+        if (e.key === 'ArrowUp') dy = -step
+        else if (e.key === 'ArrowDown') dy = step
+        else if (e.key === 'ArrowLeft') dx = -step
+        else if (e.key === 'ArrowRight') dx = step
+        // mark as manual interaction to avoid auto-centering afterwards
+        try { autoCenterDoneRef.current = true } catch {}
+        moveElementBy(primarySelectedId, dx, dy)
+        scheduleSave()
+        return
+      }
       const mod = e.ctrlKey || e.metaKey
       if (mod && e.key.toLowerCase() === 'a') {
         e.preventDefault()
@@ -1104,6 +1684,11 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     setMarquee, marquee, editing, setEditing, detachOnDragRef, dragStartPositions,
     sidebarOpen, activeProfile, setTypeStyles, removeSelected, setStudents,
     tryCreateJointAt, updateJointHover, jointHover, setJointHover, createJointFromCandidate,
+    markManual: () => { autoCenterDoneRef.current = true },
+    centerAll,
+    applySidesPairsCenterFour,
+    applySidesPairsCenterFourAngled: () => applySidesPairsCenterFour({ angled: true }),
+    applyHorseshoeLayout,
     onInlineEditKeyDown: async (el: any, e: any) => {
       if (e.key === 'Escape') { setEditing({ id: null, value: '' }); return }
       if (e.key === 'Enter') {
@@ -1138,38 +1723,59 @@ export function Editor({ classes, rooms }: { classes: { id: string; name: string
     onMoveableResize: (e: any) => {
       if (!primarySelectedId) return
       const { width, height, drag, direction } = e
+      // Pre-compute new length (w) for the selected element to sync counterpart
+      const sel = elements.find(x => x.id === primarySelectedId)
+      if (!sel) return
+      let selNewW = Math.max(10, width)
+      let selNewH = Math.max(10, height)
+      const selLineLike = sel.type === 'DOOR' || sel.type === 'WINDOW_SIDE' || sel.type === 'WALL_SIDE'
+      if (selLineLike) {
+        const rot = ((sel.rotation % 360) + 360) % 360
+        const horizontal = (Math.round(rot / 90) % 2) === 0
+        if (horizontal) selNewH = sel.h
+        else selNewW = sel.w
+      }
+      const counterpartType: ElementType | null = sel.type === 'WINDOW_SIDE' ? 'WALL_SIDE' : (sel.type === 'WALL_SIDE' ? 'WINDOW_SIDE' : null)
+
       setElements((prev: any) => prev.map((x: any) => {
-        if (x.id !== primarySelectedId) return x
-        let newW = Math.max(10, width)
-        let newH = Math.max(10, height)
-        const lineLike = x.type === 'DOOR' || x.type === 'WINDOW_SIDE' || x.type === 'WALL_SIDE'
-        if (lineLike) {
-          const rot = ((x.rotation % 360) + 360) % 360
-          const horizontal = (Math.round(rot / 90) % 2) === 0
-          if (horizontal) newH = x.h
-          else newW = x.w
+        if (x.id === primarySelectedId) {
+          // Apply the same logic as pre-compute for the selected element
+          let newW = Math.max(10, width)
+          let newH = Math.max(10, height)
+          const lineLike = x.type === 'DOOR' || x.type === 'WINDOW_SIDE' || x.type === 'WALL_SIDE'
+          if (lineLike) {
+            const rot = ((x.rotation % 360) + 360) % 360
+            const horizontal = (Math.round(rot / 90) % 2) === 0
+            if (horizontal) newH = x.h
+            else newW = x.w
+          }
+          const nx = x.x + (drag?.beforeTranslate?.[0] ?? 0)
+          const ny = x.y + (drag?.beforeTranslate?.[1] ?? 0)
+          const dxW = newW - x.w
+          const dyH = newH - x.h
+          const dirX = Array.isArray(direction) ? direction[0] : 0
+          const dirY = Array.isArray(direction) ? direction[1] : 0
+          if ((dxW !== 0 || dyH !== 0) && Array.isArray(x.meta?.joints)) {
+            const joints = x.meta!.joints as any[]
+            setTimeout(() => {
+              setElements((prev2: any) => prev2.map((n: any) => {
+                const link = joints.find((j: any) => j.otherId === n.id)
+                if (!link) return n
+                if (dirX === 1 && link.side === 'right') return { ...n, x: n.x + dxW }
+                if (dirX === -1 && link.side === 'left') return { ...n, x: n.x - dxW }
+                if (dirY === 1 && link.side === 'bottom') return { ...n, y: n.y + dyH }
+                if (dirY === -1 && link.side === 'top') return { ...n, y: n.y - dyH }
+                return n
+              }))
+            }, 0)
+          }
+          return { ...x, w: newW, h: newH, x: nx, y: ny }
         }
-        const nx = x.x + (drag?.beforeTranslate?.[0] ?? 0)
-        const ny = x.y + (drag?.beforeTranslate?.[1] ?? 0)
-        const dxW = newW - x.w
-        const dyH = newH - x.h
-        const dirX = Array.isArray(direction) ? direction[0] : 0
-        const dirY = Array.isArray(direction) ? direction[1] : 0
-        if ((dxW !== 0 || dyH !== 0) && Array.isArray(x.meta?.joints)) {
-          const joints = x.meta!.joints as any[]
-          setTimeout(() => {
-            setElements((prev2: any) => prev2.map((n: any) => {
-              const link = joints.find((j: any) => j.otherId === n.id)
-              if (!link) return n
-              if (dirX === 1 && link.side === 'right') return { ...n, x: n.x + dxW }
-              if (dirX === -1 && link.side === 'left') return { ...n, x: n.x - dxW }
-              if (dirY === 1 && link.side === 'bottom') return { ...n, y: n.y + dyH }
-              if (dirY === -1 && link.side === 'top') return { ...n, y: n.y - dyH }
-              return n
-            }))
-          }, 0)
+        // Keep window and wall the same length (w) by syncing counterpart(s)
+        if (counterpartType && x.type === counterpartType) {
+          return { ...x, w: selNewW }
         }
-        return { ...x, w: newW, h: newH, x: nx, y: ny }
+        return x
       }))
     },
   }} />
