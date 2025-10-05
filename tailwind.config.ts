@@ -11,19 +11,18 @@ export default {
     extend: {
       colors: {
         bg: {
-          DEFAULT: '#0b0f12',
-          soft: '#10161a',
+          DEFAULT: '#0c0d0f',
+          soft: '#1f1f23',
         },
         fg: {
           DEFAULT: '#e6e9ef',
           muted: '#a3aab7',
         },
         primary: {
-          DEFAULT: '#5eead4'
+          DEFAULT: '#10a37f'
         }
       }
     }
   },
   plugins: []
 } satisfies Config
-

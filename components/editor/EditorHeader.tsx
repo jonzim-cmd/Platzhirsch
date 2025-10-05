@@ -10,8 +10,8 @@ export function EditorHeader() {
       {leadPlan && (
         <div className="ml-2 flex items-center gap-2">
           <span className="text-fg-muted">Ansicht:</span>
-          <Button onClick={() => setViewMode('owner')} className={viewMode==='owner'?'bg-primary/20 text-primary':''}>Eigen</Button>
-          <Button onClick={() => setViewMode('lead')} className={viewMode==='lead'?'bg-primary/20 text-primary':''}>KL</Button>
+          <Button onClick={() => setViewMode('owner')} className={viewMode==='owner'?'text-primary':''}>Eigen</Button>
+          <Button onClick={() => setViewMode('lead')} className={viewMode==='lead'?'text-primary':''}>KL</Button>
         </div>
       )}
       <div className="text-fg-muted">
@@ -21,4 +21,3 @@ export function EditorHeader() {
     </div>
   )
 }
-

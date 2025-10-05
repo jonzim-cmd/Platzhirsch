@@ -13,8 +13,8 @@ export function EditorSidebar() {
         {leadPlan && (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-fg-muted">Ansicht:</span>
-            <Button onClick={() => setViewMode('owner')} className={viewMode==='owner'?'bg-primary/20 text-primary':''}>Eigen</Button>
-            <Button onClick={() => setViewMode('lead')} className={viewMode==='lead'?'bg-primary/20 text-primary':''}>KL</Button>
+            <Button onClick={() => setViewMode('owner')} className={viewMode==='owner'?'text-primary':''}>Eigen</Button>
+            <Button onClick={() => setViewMode('lead')} className={viewMode==='lead'?'text-primary':''}>KL</Button>
           </div>
         )}
         <div className="text-xs text-fg-muted">

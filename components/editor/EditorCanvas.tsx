@@ -187,7 +187,7 @@ export function EditorCanvas() {
           </div>
         ))}
         {ctx.marquee?.active && (
-          <div className="absolute border border-primary/60 bg-primary/10 pointer-events-none" style={{ left: Math.min(ctx.marquee.x0, ctx.marquee.x1), top: Math.min(ctx.marquee.y0, ctx.marquee.y1), width: Math.abs(ctx.marquee.x1 - ctx.marquee.x0), height: Math.abs(ctx.marquee.y1 - ctx.marquee.y0) }} />
+          <div className="absolute border border-neutral-600 bg-neutral-700/20 pointer-events-none" style={{ left: Math.min(ctx.marquee.x0, ctx.marquee.x1), top: Math.min(ctx.marquee.y0, ctx.marquee.y1), width: Math.abs(ctx.marquee.x1 - ctx.marquee.x0), height: Math.abs(ctx.marquee.y1 - ctx.marquee.y0) }} />
         )}
         {!readOnly && selectedTarget && (
           <Moveable
