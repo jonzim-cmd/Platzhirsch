@@ -20,10 +20,10 @@ export function EditorSidebar() {
       <div className="rounded border border-neutral-900 p-3 mb-3 grid gap-2">
         <div className="text-xs uppercase tracking-wide text-fg-muted">Vorlagen</div>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={applyPairsLayout}>Paare</Button>
-          <Button onClick={() => ctx.applySidesPairsCenterFour()}>2-4-2</Button>
-          <Button onClick={() => ctx.applySidesPairsCenterFourAngled()}>2-4-2 schräg</Button>
-          <Button onClick={ctx.applyHorseshoeLayout}>U-Form</Button>
+          <Button onClick={() => { ctx.historyCommit?.(); applyPairsLayout() }}>Paare</Button>
+          <Button onClick={() => { ctx.historyCommit?.(); ctx.applySidesPairsCenterFour() }}>2-4-2</Button>
+          <Button onClick={() => { ctx.historyCommit?.(); ctx.applySidesPairsCenterFourAngled() }}>2-4-2 schräg</Button>
+          <Button onClick={() => { ctx.historyCommit?.(); ctx.applyHorseshoeLayout() }}>U-Form</Button>
         </div>
       </div>
       {leadPlan && viewMode==='lead' && (
@@ -39,10 +39,10 @@ export function EditorSidebar() {
       <div className="rounded border border-neutral-900 p-3 mb-3">
         <div className="text-xs uppercase tracking-wide text-fg-muted mb-2">Elemente</div>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => addElement('TEACHER_DESK')}>Lehrer</Button>
-          <Button onClick={() => addElement('DOOR')}>Tür</Button>
-          <Button onClick={() => addElement('WINDOW_SIDE')}>Fenster</Button>
-          <Button onClick={() => addElement('WALL_SIDE')}>Wand</Button>
+          <Button onClick={() => { ctx.historyCommit?.(); addElement('TEACHER_DESK') }}>Lehrer</Button>
+          <Button onClick={() => { ctx.historyCommit?.(); addElement('DOOR') }}>Tür</Button>
+          <Button onClick={() => { ctx.historyCommit?.(); addElement('WINDOW_SIDE') }}>Fenster</Button>
+          <Button onClick={() => { ctx.historyCommit?.(); addElement('WALL_SIDE') }}>Wand</Button>
         </div>
       </div>
 
@@ -58,7 +58,7 @@ export function EditorSidebar() {
         />
         <div className="grid gap-2 max-h-[260px] overflow-auto">
           {filteredStudents.map((s: any) => (
-            <Button key={s.id} onClick={() => addElement('STUDENT', s.id)} className={`justify-start ${usedStudentIds.has(String(s.id)) ? 'opacity-60' : ''}`} disabled={usedStudentIds.has(String(s.id))}>
+            <Button key={s.id} onClick={() => { ctx.historyCommit?.(); addElement('STUDENT', s.id) }} className={`justify-start ${usedStudentIds.has(String(s.id)) ? 'opacity-60' : ''}`} disabled={usedStudentIds.has(String(s.id))}>
               <span className="flex-1 text-left">{s.foreName}</span>
               {usedStudentIds.has(String(s.id)) && <span className="text-green-400">✔</span>}
             </Button>
@@ -79,7 +79,7 @@ export function EditorSidebar() {
               <span className="tabular-nums">{selected.meta?.fontSize ?? 12}px</span>
             </label>
             <div className="flex items-center gap-2">
-              <Button title="Übernimmt die aktuelle Schriftgröße auf alle STUDENT-Elemente." onClick={() => { const v = selected?.meta?.fontSize ?? 20; const selTypes = new Set(elements.filter((e: any) => selectedIds.includes(e.id!)).map((e: any) => e.type)); ctx.setTypeStyles((prev: any) => { const cp: any = { ...prev }; for (const t of selTypes) (cp as any)[t as any] = { fontSize: v }; return cp }); setElements((prev: any) => prev.map((x: any) => selTypes.has(x.type) ? { ...x, meta: { ...(x.meta || {}), fontSize: v } } : x)); scheduleSave() }}>Auf alle Elemente dieses Typs anwenden</Button>
+              <Button title="Übernimmt die aktuelle Schriftgröße auf alle STUDENT-Elemente." onClick={() => { ctx.historyCommit?.(); const v = selected?.meta?.fontSize ?? 20; const selTypes = new Set(elements.filter((e: any) => selectedIds.includes(e.id!)).map((e: any) => e.type)); ctx.setTypeStyles((prev: any) => { const cp: any = { ...prev }; for (const t of selTypes) (cp as any)[t as any] = { fontSize: v }; return cp }); setElements((prev: any) => prev.map((x: any) => selTypes.has(x.type) ? { ...x, meta: { ...(x.meta || {}), fontSize: v } } : x)); scheduleSave() }}>Auf alle Elemente dieses Typs anwenden</Button>
             </div>
           </>
         )}

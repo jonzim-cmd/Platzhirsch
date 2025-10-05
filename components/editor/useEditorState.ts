@@ -22,6 +22,42 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
   const elementRefs = useRef<Map<string, HTMLElement>>(new Map())
   const saveTimer = useRef<NodeJS.Timeout | null>(null)
   const [clipboard, setClipboard] = useState<Element | null>(null)
+  // History (undo/redo) for element state
+  const historyRef = useRef<{ past: Element[][]; future: Element[][] }>({ past: [], future: [] })
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
+  const MAX_HISTORY = 100
+  const deepClone = (els: Element[]): Element[] => {
+    try { return (structuredClone as any)(els) } catch { return JSON.parse(JSON.stringify(els)) }
+  }
+  const updateHistoryFlags = () => {
+    setCanUndo(historyRef.current.past.length > 0)
+    setCanRedo(historyRef.current.future.length > 0)
+  }
+  const historyCommit = useCallback(() => {
+    historyRef.current.past.push(deepClone(elementsRef.current))
+    if (historyRef.current.past.length > MAX_HISTORY) historyRef.current.past.shift()
+    historyRef.current.future = []
+    updateHistoryFlags()
+  }, [])
+  const undo = useCallback(() => {
+    if (historyRef.current.past.length === 0) return
+    const prev = historyRef.current.past.pop()!
+    historyRef.current.future.push(deepClone(elementsRef.current))
+    setElements(prev)
+    setSelectedIds([])
+    updateHistoryFlags()
+    scheduleSave()
+  }, [])
+  const redo = useCallback(() => {
+    if (historyRef.current.future.length === 0) return
+    const next = historyRef.current.future.pop()!
+    historyRef.current.past.push(deepClone(elementsRef.current))
+    setElements(next)
+    setSelectedIds([])
+    updateHistoryFlags()
+    scheduleSave()
+  }, [])
   const [typeStyles, setTypeStyles] = useState<Record<ElementType, { fontSize: number }>>({
     STUDENT: { fontSize: 20 },
     TEACHER_DESK: { fontSize: 20 },
@@ -766,6 +802,19 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
     elementsRef.current = elements
   }, [elements])
 
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey
+      if (!meta) return
+      const k = String(e.key || '').toLowerCase()
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo() }
+      else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [undo, redo])
+
   useEffect(() => {
     const read = () => {
       try {
@@ -981,6 +1030,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
     if (!srcEl) return
     if (opts?.detach) {
       // Detach: remove all joints of dragged element before checking attach
+      historyCommit()
       setElements(prev => prev.map(e => e.id === id ? { ...e, meta: { ...(e.meta || {}), joints: [] } } : e))
     }
     // if dragged over >=50% of another student seat: perform swap semantics
@@ -1541,6 +1591,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
   }
 
   const createJointFromCandidate = (c: { aId: string; bId: string; aSide: Side; bSide: Side; aT: number; bT: number }) => {
+    historyCommit()
     addJoint(c.aId, c.bId, c.aSide, c.bSide, c.aT, c.bT)
     setJointHover(null)
     scheduleSave()
@@ -1819,6 +1870,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
     tryCreateJointAt, updateJointHover, jointHover, setJointHover, createJointFromCandidate,
     markManual: () => { autoCenterDoneRef.current = true },
     centerAll,
+    undo, redo, canUndo, canRedo, historyCommit,
     applySidesPairsCenterFour,
     applySidesPairsCenterFourAngled: () => applySidesPairsCenterFour({ angled: true }),
     applyHorseshoeLayout,
@@ -1833,6 +1885,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
             setStudents((prev: any) => prev.map((s: any) => s.id === el.refId ? { ...s, foreName: val } : s))
           } catch {}
         } else {
+          historyCommit()
           setElements((prev: any) => prev.map((x: any) => x.id === el.id ? { ...x, meta: { ...(x.meta || {}), label: val } } : x))
           scheduleSave()
         }
@@ -1849,6 +1902,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
           setStudents((prev: any) => prev.map((s: any) => s.id === el.refId ? { ...s, foreName: val } : s))
         } catch {}
       } else {
+        historyCommit()
         setElements((prev: any) => prev.map((x: any) => x.id === el.id ? { ...x, meta: { ...(x.meta || {}), label: val } } : x))
         scheduleSave()
       }

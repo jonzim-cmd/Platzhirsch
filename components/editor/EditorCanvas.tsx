@@ -219,6 +219,7 @@ export function EditorCanvas() {
               ;(window as any).__lastMoveableEvent = e.inputEvent
             }}
             onDragStart={(e: any) => {
+              ctx.historyCommit?.()
               ctx.detachOnDragRef.current = false
               ctx.markManual?.()
               ;(window as any).__lastMoveableEvent = e.inputEvent
@@ -242,14 +243,15 @@ export function EditorCanvas() {
               }
             }}
             onDragEnd={() => { if (primarySelectedId) { onDragEnd(primarySelectedId, { detach: ctx.detachOnDragRef.current }) } }}
-            onResizeStart={(e: any) => { ctx.markManual?.(); e.setKeepRatio?.(e.inputEvent?.shiftKey === true) }}
+            onResizeStart={(e: any) => { ctx.historyCommit?.(); ctx.markManual?.(); e.setKeepRatio?.(e.inputEvent?.shiftKey === true) }}
             onResize={ctx.onMoveableResize}
             onResizeEnd={() => scheduleSave()}
+            onRotateStart={() => { ctx.historyCommit?.(); ctx.markManual?.() }}
             onRotate={(e: any) => { if (!primarySelectedId) return; setElements((prev: any) => prev.map((x: any) => x.id === primarySelectedId ? { ...x, rotation: e.beforeRotate } : x)) }}
             onRotateEnd={() => scheduleSave()}
           />
         )}
-        <JointOverlay elements={elements} readOnly={readOnly} hoverCandidate={ctx.jointHover} onCreate={(c:any)=>ctx.createJointFromCandidate?.(c)} onDetach={(a: string, b: string) => { removeJoint(a, b); scheduleSave() }} />
+        <JointOverlay elements={elements} readOnly={readOnly} hoverCandidate={ctx.jointHover} onCreate={(c:any)=>{ ctx.historyCommit?.(); ctx.createJointFromCandidate?.(c) }} onDetach={(a: string, b: string) => { ctx.historyCommit?.(); removeJoint(a, b); scheduleSave() }} />
       </div>
     </div>
   )
