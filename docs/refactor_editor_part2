@@ -1,0 +1,42 @@
+
+## 🧠 GPT-5 Prompt: State-Layer aus `Editor.tsx` extrahieren
+
+<task_summary>  
+Der `Editor.tsx` ist aktuell noch sehr lang, da er alle State-/Effekt-/Action-Logik enthält. Ziel ist es, diesen Layer vollständig und **mechanisch** in einen eigenen Hook (`useEditorState.ts`) auszulagern, **ohne jegliche Verhaltensänderung**.  
+</task_summary>  
+
+<code_editing_rules>  
+  <guiding_principles>  
+    - Ziel ist ein **rein mechanischer Umzug** (kein Refactoring, keine Optimierung, keine Umbenennungen).  
+    - Das Verhalten der Anwendung darf sich **nicht ändern**.  
+    - Bestehende Funktionsnamen, Rückgabewerte, und Logik bleiben identisch.  
+  </guiding_principles>  
+
+  <file_structure_goal>  
+    - Neuer Hook: `useEditorState.ts`  
+    - Zielstruktur:  
+      - `Editor.tsx`: Hook aufrufen → Value in Provider → UI-Komponenten rendern  
+      - `useEditorState.ts`: Enthält **alle** States, Refs, Effekte und Actions  
+  </file_structure_goal>  
+
+  <context_improvement>  
+    - Typisiere den `EditorContext` klar und explizit.  
+    - Nutze ein eindeutiges Interface für den Context-Value für bessere Developer Experience & Autocomplete.  
+  </context_improvement>  
+</code_editing_rules>  
+
+<self_reflection>  
+Denke zuerst über die notwendigen Migrationsschritte nach, bevor du beginnst:  
+- Wie identifiziere ich alle betroffenen States, Refs, Actions und Effekte systematisch?  
+- Wie stelle ich sicher, dass alle Abhängigkeiten korrekt übernommen werden?  
+- Wie kann ich die Trennung so vornehmen, dass der Code danach eindeutig wartbar bleibt?  
+</self_reflection>  
+
+<persistence>  
+- Handle diesen Move als “Zero-Risk”-Refactoring.  
+- Verwende klare TODO-Kommentare bei Unsicherheiten oder Übergangsstellen.  
+- Dokumentiere alle Annahmen und Behaltensentscheidungen im Code.  
+- Vermeide übermäßige Rückfragen – treffe nachvollziehbare Default-Entscheidungen.  
+</persistence>  
+
+<reasoning_effort>medium</reasoning_effort>  
