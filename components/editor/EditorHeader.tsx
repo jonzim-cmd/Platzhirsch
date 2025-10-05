@@ -6,9 +6,8 @@ import { useEditor } from '@/components/editor/EditorContext'
 export function EditorHeader() {
   const { leadPlan, viewMode, setViewMode, saving } = useEditor()
   return (
-    <div className="pointer-events-auto absolute right-3 top-3 flex items-center gap-2 text-xs" style={{ zIndex: Z.toolbar }}>
-      {/* Undo button */}
-      <UndoButton />
+    <div className="pointer-events-auto absolute right-0 top-0 flex items-center gap-2 text-xs" style={{ zIndex: Z.toolbar }}>
+      <SaveGroup />
       {leadPlan && (
         <div className="ml-2 flex items-center gap-2">
           <span className="text-fg-muted">Ansicht:</span>
@@ -16,23 +15,32 @@ export function EditorHeader() {
           <Button onClick={() => setViewMode('lead')} className={viewMode==='lead'?'text-primary':''}>KL</Button>
         </div>
       )}
-      <div className="text-fg-muted">
-        {saving === 'saving' && <span className="ml-3">Speichern…</span>}
-        {saving === 'saved' && <span className="ml-3 text-primary">Gespeichert</span>}
-      </div>
     </div>
   )
 }
 
-function UndoButton() {
-  const { undo, canUndo, readOnly } = useEditor()
+function SaveGroup() {
+  const { undo, canUndo, readOnly, saving } = useEditor()
   const disabled = readOnly || !canUndo
   return (
-    <Button aria-label="Rückgängig" title="Rückgängig (⌘Z / Ctrl+Z)" disabled={disabled} onClick={() => undo?.()}>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <polyline points="9 14 4 9 9 4" />
-        <path d="M20 20a8 8 0 0 0-8-8H4" />
-      </svg>
-    </Button>
+    <div className="mr-2 flex items-center gap-2 rounded bg-bg pl-2 pr-0 py-1">
+      <div className="leading-none text-fg-muted select-none">
+        {saving === 'saving' && <span>Speichern…</span>}
+        {saving === 'saved' && <span className="text-primary">Gespeichert</span>}
+      </div>
+      <button
+        type="button"
+        aria-label="Rückgängig"
+        title="Rückgängig (⌘Z / Ctrl+Z)"
+        disabled={disabled}
+        onClick={() => undo?.()}
+        className="inline-flex items-center justify-center rounded text-fg disabled:opacity-50 hover:bg-neutral-800/40 px-3 py-1"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M3 7v6h6" />
+          <path d="M3.51 15.49A9 9 0 1 0 5.64 5.64L3 8.29" />
+        </svg>
+      </button>
+    </div>
   )
 }
