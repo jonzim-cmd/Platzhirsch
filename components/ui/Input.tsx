@@ -7,7 +7,7 @@ type InputProps = React.InputHTMLAttributes<HTMLInputElement> & {
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ label, className = '', ...props }, ref) => {
     return (
-      <label className="grid gap-2 text-sm">
+      <label className="inline-grid gap-2 text-sm">
         {label ? <span className="text-fg-muted">{label}</span> : null}
         <input
           ref={ref}

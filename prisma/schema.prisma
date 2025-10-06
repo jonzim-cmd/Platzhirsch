@@ -73,10 +73,12 @@ model SeatingPlan {
   sourcePlanId    String?
   derivedPlans    SeatingPlan[] @relation("PlanSource")
   title           String?
+  isDefault       Boolean  @default(false)
   updatedAt       DateTime @updatedAt
   elements        SeatingElement[]
 
-  @@unique([ownerProfileId, classId, roomId])
+  // Multiple plans per (owner, class, room) are allowed.
+  // Exactly one default per context is enforced in application logic.
 }
 
 model SeatingElement {

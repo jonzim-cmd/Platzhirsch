@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button'
 
 type Row = Record<string, any>
 
-export function ImportStudents() {
+export function ImportStudents({ onComplete }: { onComplete?: (result: { createdStudents: number; updatedStudents: number; createdClasses: number; errors: { index: number; message: string }[] }) => void }) {
   const [errors, setErrors] = useState<string[]>([])
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState<null | { createdStudents: number; updatedStudents: number; createdClasses: number; errors: { index: number; message: string }[] }>(null)
@@ -73,6 +73,7 @@ export function ImportStudents() {
       const text = await res.text()
       const data = text ? JSON.parse(text) : null
       setResult(data)
+      try { onComplete?.(data) } catch {}
     } catch (e: any) {
       const isAbort = e?.name === 'AbortError' || /aborted/i.test(String(e?.message))
       const msg = isAbort ? 'Zeitüberschreitung: Server nicht erreichbar (mögliche DB-Verbindung).' : (e?.message ?? 'Import fehlgeschlagen')

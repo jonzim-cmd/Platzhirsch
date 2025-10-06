@@ -10,6 +10,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
   const [classId, setClassId] = useState('')
   const [roomId, setRoomId] = useState('')
   const [plan, setPlan] = useState<Plan | null>(null)
+  const [planId, setPlanId] = useState<string>('')
   const planRef = useRef<Plan | null>(null)
   const [leadPlan, setLeadPlan] = useState<Plan | null>(null)
   const [viewMode, setViewMode] = useState<'owner' | 'lead'>('owner')
@@ -823,8 +824,10 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
         const url = new URL(window.location.href)
         const c = url.searchParams.get('c')
         const r = url.searchParams.get('r')
+        const pl = url.searchParams.get('pl')
         if (c) setClassId(c)
         if (r) setRoomId(r)
+        if (pl) setPlanId(pl)
       } catch { setActiveProfile(null) }
     }
     read()
@@ -835,7 +838,18 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
         try { const v = JSON.parse(e.newValue); setSidebarOpen(!!v.open) } catch{}
       }
     }
+    const onSelection = (e: StorageEvent) => {
+      if (e.key === 'selection' && e.newValue) {
+        try {
+          const v = JSON.parse(e.newValue)
+          if (v?.c) setClassId(v.c)
+          if (v?.r) setRoomId(v.r)
+          if (v?.pl) setPlanId(v.pl)
+        } catch {}
+      }
+    }
     window.addEventListener('storage', onSidebar)
+    window.addEventListener('storage', onSelection)
     return () => window.removeEventListener('storage', h)
   }, [])
 
@@ -849,10 +863,23 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
 
   const loadPlan = useCallback(async (create: boolean) => {
     if (!activeProfile?.id || !classId || !roomId) return
-    const res = await fetch(`/api/plan?ownerProfileId=${activeProfile.id}&classId=${classId}&roomId=${roomId}&create=${create ? '1' : '0'}&includeLead=1`)
+    const qs = planId
+      ? `planId=${encodeURIComponent(planId)}&classId=${encodeURIComponent(classId)}&roomId=${encodeURIComponent(roomId)}&includeLead=1`
+      : `ownerProfileId=${encodeURIComponent(activeProfile.id)}&classId=${encodeURIComponent(classId)}&roomId=${encodeURIComponent(roomId)}&create=${create ? '1' : '0'}&includeLead=1`
+    const res = await fetch(`/api/plan?${qs}`)
     if (!res.ok) return
     const data = await res.json()
     setPlan(data.plan)
+    if (!planId) {
+      // synchronize discovered planId back to URL via storage event
+      try {
+        const url = new URL(window.location.href)
+        url.searchParams.set('pl', data.plan.id)
+        window.history.replaceState({}, '', url.toString())
+        window.dispatchEvent(new StorageEvent('storage', { key: 'selection', newValue: JSON.stringify({ p: activeProfile.id, c: classId, r: roomId, pl: data.plan.id }) }))
+      } catch {}
+      setPlanId(data.plan.id)
+    }
     setLeadPlan(data.leadPlan)
     // Convert legacy groupId relations to explicit joints on load
     const rawEls: Element[] = data.plan.elements.map((e: any) => ({ ...e }))
@@ -933,14 +960,14 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
     setSelectedIds([])
     // persist conversion
     setTimeout(() => scheduleSave(), 0)
-  }, [activeProfile?.id, classId, roomId])
+  }, [activeProfile?.id, classId, roomId, planId])
 
   // Auto-load or create plan when filters are selected (after loadPlan is defined)
   useEffect(() => {
     if (activeProfile?.id && classId && roomId) {
       loadPlan(true)
     }
-  }, [activeProfile?.id, classId, roomId, loadPlan])
+  }, [activeProfile?.id, classId, roomId, planId, loadPlan])
 
   const scheduleSave = useCallback(() => {
     if (!planRef.current) return
@@ -1857,7 +1884,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
   }
 
   return {
-    leadPlan, viewMode, setViewMode, saving,
+    plan, leadPlan, viewMode, setViewMode, saving,
     frameRef, canvasRef, frameSize,
     readOnly, elements, selectedIds, setSelectedIds,
     elementRefs, selected, studentById, defaultTerms,

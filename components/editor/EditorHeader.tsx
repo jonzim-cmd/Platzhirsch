@@ -2,32 +2,99 @@
 import { Button } from '@/components/ui/Button'
 import { Z } from '@/components/ui/zIndex'
 import { useEditor } from '@/components/editor/EditorContext'
+import { useEffect, useMemo, useState } from 'react'
 
 export function EditorHeader() {
-  const { leadPlan, viewMode, setViewMode, saving } = useEditor()
   return (
     <div className="pointer-events-auto absolute right-0 top-0 flex items-center gap-2 text-xs" style={{ zIndex: Z.toolbar }}>
       <SaveGroup />
-      {leadPlan && (
-        <div className="ml-2 flex items-center gap-2">
-          <span className="text-fg-muted">Ansicht:</span>
-          <Button onClick={() => setViewMode('owner')} className={viewMode==='owner'?'text-primary':''}>Eigen</Button>
-          <Button onClick={() => setViewMode('lead')} className={viewMode==='lead'?'text-primary':''}>KL</Button>
-        </div>
-      )}
     </div>
   )
 }
 
 function SaveGroup() {
-  const { undo, canUndo, readOnly, saving } = useEditor()
+  const { undo, canUndo, readOnly, saving, plan, classId, activeProfile, leadPlan, viewMode, setViewMode } = useEditor()
+  const [isLead, setIsLead] = useState(false)
+  const [shared, setShared] = useState(false)
+  const [shareBusy, setShareBusy] = useState(false)
+  const [toast, setToast] = useState<'shared'|'unshared'|null>(null)
+  const canShare = useMemo(() => Boolean(isLead && plan && plan.title === null), [isLead, plan?.id, plan?.title])
   const disabled = readOnly || !canUndo
+  useEffect(() => {
+    let alive = true
+    async function checkLead() {
+      try {
+        const res = await fetch('/api/classes')
+        if (!res.ok) { if (alive) setIsLead(false); return }
+        const classes = await res.json()
+        const c = classes.find((x: any) => x.id === classId)
+        if (alive) setIsLead(!!c && c.leadProfileId === activeProfile?.id)
+      } catch { if (alive) setIsLead(false) }
+    }
+    if (classId && activeProfile?.id) checkLead(); else setIsLead(false)
+    return () => { alive = false }
+  }, [classId, activeProfile?.id])
+  useEffect(() => {
+    let alive = true
+    async function loadShare() {
+      if (!canShare || !plan?.id) { if (alive) setShared(false); return }
+      try {
+        const res = await fetch(`/api/plan/share?planId=${encodeURIComponent(plan.id)}`)
+        if (!res.ok) { if (alive) setShared(false); return }
+        const data = await res.json()
+        if (alive) setShared(!!data?.shared)
+      } catch { if (alive) setShared(false) }
+    }
+    loadShare()
+    return () => { alive = false }
+  }, [canShare, plan?.id])
   return (
     <div className="mr-2 flex items-center gap-2 rounded bg-bg pl-2 pr-0 py-1">
       <div className="leading-none text-fg-muted select-none">
         {saving === 'saving' && <span>Speichern…</span>}
         {saving === 'saved' && <span className="text-primary">Gespeichert</span>}
       </div>
+      {leadPlan && (
+        <div className="flex items-center gap-2 pr-1">
+          <span className="text-fg-muted">Ansicht:</span>
+          <Button onClick={() => setViewMode('owner')} className={viewMode==='owner'?'text-primary':''}>Eigen</Button>
+          <Button onClick={() => setViewMode('lead')} className={viewMode==='lead'?'text-primary':''}>KL</Button>
+        </div>
+      )}
+      {canShare && (
+        <div className="flex items-center gap-2 pr-1">
+          {!shared && (
+            <Button
+              variant="primary"
+              disabled={shareBusy}
+              onClick={async () => {
+                setShareBusy(true)
+                try {
+                  await fetch('/api/plan/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ planId: plan!.id, action: 'share' }) })
+                  setShared(true)
+                  setToast('shared'); setTimeout(() => setToast(null), 1200)
+                } finally { setShareBusy(false) }
+              }}
+            >Freigeben</Button>
+          )}
+          {shared && (
+            <Button
+              variant="danger"
+              disabled={shareBusy}
+              onClick={async () => {
+                setShareBusy(true)
+                try {
+                  await fetch('/api/plan/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ planId: plan!.id, action: 'unshare' }) })
+                  setShared(false)
+                  setToast('unshared'); setTimeout(() => setToast(null), 1200)
+                } finally { setShareBusy(false) }
+              }}
+            >Freigabe aufheben</Button>
+          )}
+          {toast === 'shared' && <span className="text-primary">Freigegeben</span>}
+          {toast === 'unshared' && <span className="text-fg-muted">Freigabe aufgehoben</span>}
+        </div>
+      )}
       <button
         type="button"
         aria-label="Rückgängig"

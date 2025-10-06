@@ -29,23 +29,34 @@ export default async function ProfilesPage() {
   return (
     <main className="container py-8 grid gap-6">
       <h1 className="text-xl font-semibold">Profile</h1>
-      <section className="grid gap-3">
-        <form
-          action={async (formData: FormData) => {
-            'use server'
-            const name = (formData.get('name') as string)?.trim()
-            if (!name) return
-            await createProfile(name)
-          }}
-          className="flex items-end gap-3"
-        >
-          <Input name="name" label="Neues Profil" placeholder="z. B. Frau Müller" />
-          <Button type="submit" variant="primary">Anlegen</Button>
-        </form>
-        <p className="text-xs text-fg-muted">Hinweis: Keine Anmeldung. Alle Profile sind für alle sichtbar und bearbeitbar.</p>
-      </section>
-
-      <ProfilesList />
+      <div className="grid grid-cols-2 items-start gap-6">
+        <section className="grid gap-3">
+          <form
+            action={async (formData: FormData) => {
+              'use server'
+              const name = (formData.get('name') as string)?.trim()
+              if (!name) return
+              await createProfile(name)
+            }}
+            className="grid gap-2"
+          >
+            <span className="text-sm text-fg-muted">Neues Profil</span>
+            <div className="flex items-center gap-3">
+              <Input name="name" placeholder="z. B. Frau Müller" />
+              <Button type="submit" variant="primary">
+                Anlegen
+              </Button>
+            </div>
+          </form>
+          <p className="text-xs text-fg-muted">
+            Hinweis: Keine Anmeldung. Alle Profile sind für alle sichtbar und bearbeitbar.
+          </p>
+        </section>
+        <section className="grid gap-3">
+          <h2 className="text-sm text-fg-muted">Profilnamen</h2>
+          <ProfilesList />
+        </section>
+      </div>
     </main>
   )
 }

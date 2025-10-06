@@ -30,8 +30,8 @@ export function EditorSidebar() {
         <div className="rounded border border-neutral-900 p-3 grid gap-2">
           <div className="text-sm font-medium">KL-Plan</div>
           <div className="text-xs text-fg-muted">Du kannst den Plan der Klassenleitung ansehen. Änderungen sind hier nicht möglich.</div>
-          {ctx.activeProfile && (
-            <Button variant="primary" onClick={async () => { await fetch('/api/plan/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ownerProfileId: ctx.activeProfile!.id, classId, roomId, sourcePlanId: leadPlan!.id }) }); setViewMode('owner'); await loadPlan(false) }}>Als Kopie übernehmen</Button>
+          {ctx.activeProfile && ctx.plan?.id && (
+            <Button variant="primary" onClick={async () => { await fetch('/api/plan/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetPlanId: ctx.plan!.id, sourcePlanId: leadPlan!.id }) }); setViewMode('owner'); await loadPlan(false) }}>Als Kopie übernehmen</Button>
           )}
         </div>
       )}

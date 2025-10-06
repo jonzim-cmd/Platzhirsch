@@ -1,11 +1,13 @@
 "use client"
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { ProfileSettingsModal } from '@/components/profile/ProfileSettingsModal'
+import { InlineInput } from '@/components/ui/InlineInput'
 
 type Profile = { id: string; name: string }
 type Class = { id: string; name: string }
 type Room = { id: string; name: string }
+type PlanRow = { id: string; title: string | null; isDefault: boolean }
 
 export function TopBar() {
   const [profiles, setProfiles] = useState<Profile[]>([])
@@ -14,9 +16,37 @@ export function TopBar() {
   const [activeProfile, setActiveProfile] = useState<Profile | null>(null)
   const [classId, setClassId] = useState('')
   const [roomId, setRoomId] = useState('')
+  const [plans, setPlans] = useState<PlanRow[]>([])
+  const [planId, setPlanId] = useState('')
+  // Derive a selected plan id that prefers the default plan when none chosen yet
+  const computedPlanId = useMemo(() => {
+    return planId || plans.find(p => p.isDefault)?.id || plans[0]?.id || ''
+  }, [planId, plans])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [createMode, setCreateMode] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // Inline create/rename state
+  const [creatingProfile, setCreatingProfile] = useState(false)
+  const [renamingProfile, setRenamingProfile] = useState(false)
+  const [profileDraftName, setProfileDraftName] = useState('')
+  const profileInputRef = useRef<HTMLInputElement | null>(null)
+  const [jumpToClasses, setJumpToClasses] = useState(false)
+
+  // Only show rooms that are assigned for the active profile (union across classes)
+  const visibleRooms = useMemo(() => {
+    try {
+      if (!activeProfile?.id) return rooms
+      const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
+      if (!raw) return rooms
+      const mapping = JSON.parse(raw) as Record<string, string[]>
+      const byName = new Set<string>()
+      Object.values(mapping).forEach(list => (list || []).forEach(n => byName.add(n)))
+      if (byName.size === 0) return rooms
+      return rooms.filter(r => byName.has(r.name))
+    } catch {
+      return rooms
+    }
+  }, [rooms, activeProfile?.id])
 
   useEffect(() => {
     fetch('/api/profiles').then(r=>r.json()).then(setProfiles).catch(()=>{})
@@ -27,6 +57,7 @@ export function TopBar() {
       const p = url.searchParams.get('p')
       const c = url.searchParams.get('c')
       const r = url.searchParams.get('r')
+      const pl = url.searchParams.get('pl')
       const lp = localStorage.getItem('activeProfile')
       if (p && profiles.length) {
         const prof = profiles.find(x=>x.id===p) || null
@@ -35,13 +66,72 @@ export function TopBar() {
       } else if (lp) setActiveProfile(JSON.parse(lp))
       if (c) setClassId(c)
       if (r) setRoomId(r)
+      if (pl) setPlanId(pl)
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Listen for external selection changes (e.g., default plan auto-created in editor)
+  useEffect(() => {
+    const onSelection = (e: StorageEvent) => {
+      if (e.key === 'selection' && e.newValue) {
+        try {
+          const v = JSON.parse(e.newValue)
+          // Do not change active profile from external events
+          if (v?.c) setClassId(v.c)
+          if (v?.r) setRoomId(v.r)
+          if (v?.pl) setPlanId(v.pl)
+        } catch {}
+      } else if (e.key === 'dataChanged') {
+        // refresh lists (profiles, rooms, and classes for active profile)
+        ;(async () => {
+          try {
+            const [ps, rs] = await Promise.all([
+              fetch('/api/profiles').then(r=>r.json()),
+              fetch('/api/rooms').then(r=>r.json())
+            ])
+            setProfiles(ps)
+            setRooms(rs)
+            if (activeProfile) {
+              const cls = await fetch(`/api/classes?profileId=${activeProfile.id}`).then(r=>r.json())
+              setClasses(cls)
+              // If current class selection no longer exists, clear it
+              if (cls.findIndex((k: any) => k.id === classId) === -1) setClassId('')
+              const updated = ps.find((p: any) => p.id === activeProfile.id)
+              if (updated) {
+                setActiveProfile(updated)
+                localStorage.setItem('activeProfile', JSON.stringify(updated))
+              } else {
+                // Active profile no longer exists: clear selection immediately
+                setActiveProfile(null)
+                setClassId('')
+                setRoomId('')
+                setPlanId('')
+                try {
+                  localStorage.removeItem('activeProfile')
+                } catch {}
+                updateUrl(undefined, undefined, undefined, undefined)
+              }
+            }
+          } catch { /* noop */ }
+        })()
+      }
+    }
+    window.addEventListener('storage', onSelection)
+    return () => window.removeEventListener('storage', onSelection)
+  }, [profiles, activeProfile, classId])
+
+  // Focus the inline input when creating/renaming toggles on
+  useEffect(() => {
+    if ((creatingProfile || renamingProfile) && profileInputRef.current) {
+      profileInputRef.current.focus()
+      profileInputRef.current.select()
+    }
+  }, [creatingProfile, renamingProfile])
+
   // whenever profile changes, load its classes
   useEffect(() => {
-    if (!activeProfile) { setClasses([]); updateUrl(undefined, undefined, undefined); return }
+    if (!activeProfile) { setClasses([]); updateUrl(undefined, undefined, undefined, undefined); return }
     fetch(`/api/classes?profileId=${activeProfile.id}`).then(r=>r.json()).then((cls: Class[]) => {
       setClasses(cls)
       // if currently selected class not in list, clear
@@ -49,25 +139,116 @@ export function TopBar() {
     })
     // sync URL/localStorage
     localStorage.setItem('activeProfile', JSON.stringify(activeProfile))
-    updateUrl(activeProfile.id, classId || undefined, roomId || undefined)
+    // reset selected plan when switching profiles to avoid cross-profile planId bleed
+    setPlanId('')
+    updateUrl(activeProfile.id, classId || undefined, roomId || undefined, undefined)
   }, [activeProfile?.id])
 
+  // Clear room selection when it becomes invalid for the filtered list
   useEffect(() => {
-    updateUrl(activeProfile?.id, classId || undefined, roomId || undefined)
+    if (!roomId) return
+    if (!visibleRooms.some(r => r.id === roomId)) setRoomId('')
+  }, [visibleRooms, roomId])
+
+  // Clear plan selection on class/room change so new context decides default
+  useEffect(() => {
+    if (planId) {
+      setPlanId('')
+      updateUrl(activeProfile?.id, classId || undefined, roomId || undefined, undefined)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classId, roomId])
 
-  function updateUrl(p?: string, c?: string, r?: string) {
+  useEffect(() => {
+    updateUrl(activeProfile?.id, classId || undefined, roomId || undefined, planId || undefined)
+  }, [classId, roomId, planId])
+
+  // Load plans whenever owner/class/room changes
+  useEffect(() => {
+    const ownerId = activeProfile?.id
+    if (!ownerId || !classId || !roomId) { setPlans([]); setPlanId(''); return }
+    // reset current plan selection for new context to ensure default selection
+    setPlanId('')
+    fetch(`/api/plans?ownerProfileId=${ownerId}&classId=${classId}&roomId=${roomId}`)
+      .then(r=>r.json())
+      .then((data) => {
+        const raw: PlanRow[] = (data?.plans || [])
+        // de-duplicate multiple defaults defensively (keep the first/default-most recent)
+        let seenDefault = false
+        const arr = raw.filter((p) => {
+          if (p.isDefault) {
+            if (seenDefault) return false
+            seenDefault = true
+          }
+          return true
+        })
+        setPlans(arr)
+        const def = arr.find(p => p.isDefault) || arr[0]
+        if (def) setPlanId(def.id)
+      })
+      .catch(() => { setPlans([]); setPlanId('') })
+  }, [activeProfile?.id, classId, roomId])
+
+  // Ensure a plan is always selected once plans are present
+  useEffect(() => {
+    if (!activeProfile?.id || !classId || !roomId) return
+    if (plans.length === 0) return
+    if (!planId) {
+      const def = plans.find(p => p.isDefault) || plans[0]
+      if (def) setPlanId(def.id)
+    }
+  }, [activeProfile?.id, classId, roomId, plans, planId])
+
+  function updateUrl(p?: string, c?: string, r?: string, pl?: string) {
     const url = new URL(window.location.href)
-    url.searchParams.delete('p'); url.searchParams.delete('c'); url.searchParams.delete('r')
+    url.searchParams.delete('p'); url.searchParams.delete('c'); url.searchParams.delete('r'); url.searchParams.delete('pl')
     if (p) url.searchParams.set('p', p)
     if (c) url.searchParams.set('c', c)
     if (r) url.searchParams.set('r', r)
+    if (pl) url.searchParams.set('pl', pl)
     window.history.replaceState({}, '', url.toString())
     // also broadcast to other components
-    window.dispatchEvent(new StorageEvent('storage', { key: 'selection', newValue: JSON.stringify({ p, c, r }) }))
+    window.dispatchEvent(new StorageEvent('storage', { key: 'selection', newValue: JSON.stringify({ p, c, r, pl }) }))
   }
 
-  const profileLabel = useMemo(() => activeProfile?.name ?? 'Profil wählen…', [activeProfile])
+  const profileLabel = useMemo(() => 'Profil wählen…', [])
+
+  async function createProfileInline() {
+    const trimmed = profileDraftName.trim()
+    if (!trimmed) return
+    try {
+      const res = await fetch('/api/profiles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmed }) })
+      if (!res.ok) return
+      const created = await res.json()
+      const newProfile: Profile = { id: created.id, name: created.name }
+      setProfiles(prev => [newProfile, ...prev])
+      setActiveProfile(newProfile)
+      setCreatingProfile(false)
+      setProfileDraftName('')
+      localStorage.setItem('activeProfile', JSON.stringify(newProfile))
+      updateUrl(newProfile.id, undefined, undefined, undefined)
+      // open settings to finish setup (classes/rooms/etc.)
+      setCreateMode(false)
+      setTimeout(() => setSettingsOpen(true), 0)
+      setJumpToClasses(true)
+    } catch { /* noop */ }
+  }
+
+  async function renameProfileInline() {
+    const trimmed = profileDraftName.trim()
+    if (!trimmed || !activeProfile) { setRenamingProfile(false); return }
+    try {
+      const res = await fetch(`/api/profiles/${activeProfile.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmed }) })
+      if (!res.ok) return
+      setProfiles(prev => prev.map(p => p.id === activeProfile.id ? { ...p, name: trimmed } : p))
+      const updated = { ...activeProfile, name: trimmed }
+      setActiveProfile(updated)
+      setRenamingProfile(false)
+      setProfileDraftName('')
+      localStorage.setItem('activeProfile', JSON.stringify(updated))
+      updateUrl(updated.id, classId || undefined, roomId || undefined, planId || undefined)
+    } catch { /* noop */ }
+  }
 
   return (
     <header className="border-b border-neutral-900 bg-bg-soft">
@@ -88,19 +269,56 @@ export function TopBar() {
         <div className="container flex flex-1 items-center justify-start gap-3">
           <div className="flex items-center gap-2">
             {/* Profile */}
-            <select
-              value={activeProfile?.id || ''}
-              onChange={(e) => {
-                if (e.target.value === '__new__') { setCreateMode(true); setSettingsOpen(true); return }
-                const p = profiles.find(x => x.id === e.target.value) || null
-                setActiveProfile(p)
-              }}
-              className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800"
-            >
-              <option value="">{profileLabel}</option>
-              {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              <option value="__new__">+ Profil anlegen…</option>
-            </select>
+            {/* Profile selector with inline create/rename */}
+            {!creatingProfile && !renamingProfile && (
+              <div className="flex items-center gap-2">
+                <select
+                  value={activeProfile?.id || ''}
+                  onChange={(e) => {
+                    const p = profiles.find(x => x.id === e.target.value) || null
+                    setActiveProfile(p)
+                  }}
+                  className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800"
+                >
+                  {!activeProfile && <option value="">{profileLabel}</option>}
+                  {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <Button
+                  aria-label="Neues Profil"
+                  title="Neues Profil"
+                  onClick={() => {
+                    setCreatingProfile(true)
+                    setRenamingProfile(false)
+                    setProfileDraftName('')
+                  }}
+                  className="px-2 py-1"
+                >
+                  +
+                </Button>
+              </div>
+            )}
+            {(creatingProfile || renamingProfile) && (
+              <div className="flex items-center gap-2">
+                <InlineInput
+                  ref={profileInputRef}
+                  value={profileDraftName}
+                  onChange={(e) => setProfileDraftName(e.target.value)}
+                  placeholder={creatingProfile ? 'Namen angeben' : 'Profilname'}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') creatingProfile ? createProfileInline() : renameProfileInline()
+                    if (e.key === 'Escape') { setCreatingProfile(false); setRenamingProfile(false); setProfileDraftName('') }
+                  }}
+                  className="w-56"
+                />
+                <Button
+                  onClick={() => creatingProfile ? createProfileInline() : renameProfileInline()}
+                  variant="primary"
+                >
+                  {creatingProfile ? 'Anlegen' : 'Speichern'}
+                </Button>
+                <Button onClick={() => { setCreatingProfile(false); setRenamingProfile(false); setProfileDraftName('') }}>Abbrechen</Button>
+              </div>
+            )}
 
             {/* Class */}
             <select
@@ -120,8 +338,43 @@ export function TopBar() {
               className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800"
             >
               <option value="">Raum wählen…</option>
-              {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              {visibleRooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
+
+            {/* Active Plan */}
+            <select
+              value={computedPlanId}
+              onChange={async (e) => {
+                if (e.target.value === '__new__') {
+                  // simple prompt for name
+                  const name = window.prompt('Neuen Plan benennen:', 'Neuer Plan') || ''
+                  const trimmed = name.trim()
+                  if (!trimmed) { e.target.value = planId; return }
+                  try {
+                    const body: any = { ownerProfileId: activeProfile!.id, classId, roomId, name: trimmed, sourcePlanId: planId || undefined }
+                    const res = await fetch('/api/plans', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+                    if (!res.ok) throw new Error('create failed')
+                    const data = await res.json()
+                    const created = data.plan
+                    setPlans((prev) => [{ id: created.id, title: created.title, isDefault: false }, ...prev])
+                    setPlanId(created.id)
+                  } catch { /* noop */ }
+                  return
+                }
+                setPlanId(e.target.value)
+              }}
+              disabled={!activeProfile || !classId || !roomId}
+              className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800 disabled:opacity-50"
+            >
+              <option value="">Plan wählen…</option>
+              {plans.map(pl => (
+                <option key={pl.id} value={pl.id}>{pl.isDefault ? 'Standard' : (pl.title || 'Plan')}</option>
+              ))}
+              <option value="__new__">+ Neuer Plan…</option>
+            </select>
+            {planId === '__new__' && (
+              <span className="hidden" />
+            )}
           </div>
 
         </div>
@@ -138,8 +391,10 @@ export function TopBar() {
           <ProfileSettingsModal
             createMode={createMode}
             profile={createMode ? null : activeProfile}
+            jumpTo={jumpToClasses ? 'classes' : undefined}
             onClose={async (changed) => {
               setSettingsOpen(false)
+              setJumpToClasses(false)
               if (changed) {
                 const [ps, rs] = await Promise.all([
                   fetch('/api/profiles').then(r=>r.json()),
