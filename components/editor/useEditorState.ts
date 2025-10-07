@@ -569,12 +569,11 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
     const n = nStudents > 0 ? nStudents : existingSeats.length
     if (n === 0) return
 
-    const perRowSeats = 8 // 2 (pair) + 4 + 2 (pair)
-    const rows = Math.ceil(n / perRowSeats)
     const newSeats: Element[] = []
 
     const deg2rad = (deg: number) => (deg * Math.PI) / 180
-    for (let r = 0, used = 0; r < rows && used < n; r++) {
+    // Build rows until all students are placed. Center block limited to 3 rows; sides continue.
+    for (let r = 0, used = 0; used < n && r < 100; r++) {
       const y = marginY + r * (seatH + betweenRowsY)
       // Compute total width of one row to center horizontally
       let totalW: number
@@ -626,12 +625,16 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
       }
       const lpB: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: lpB_x, y: lpB_y, w: seatW, h: seatH, rotation: leftAngle, z: newSeats.length + 1, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
       // No automatic joints for the left pair; connections are manual.
-      // Center 4
+      // Center 4 (only rows 0..2)
       const centerX = leftPairX + leftPairSpanX + gapBetweenGroups
-      const c1: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 0 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 2, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
-      const c2: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 1 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 3, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
-      const c3: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 2 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 4, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
-      const c4: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 3 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 5, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      let centerSeats: Element[] = []
+      if (r < 3) {
+        const c1: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 0 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 2, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+        const c2: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 1 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 3, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+        const c3: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 2 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 4, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+        const c4: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 3 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 5, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+        centerSeats = [c1, c2, c3, c4]
+      }
       // Right pair
       const rightPairX = centerX + 4 * seatW + gapBetweenGroups
       const rightAngle = angled ? 10 : 0
@@ -651,7 +654,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
       const rpB: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: rpB_x, y: rpB_y, w: seatW, h: seatH, rotation: rightAngle, z: newSeats.length + 7, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
       // No automatic joints for the right pair; connections are manual.
 
-      const rowSeats = [lpA, lpB, c1, c2, c3, c4, rpA, rpB]
+      const rowSeats = [lpA, lpB, ...centerSeats, rpA, rpB]
       for (const s of rowSeats) { if (used < n) { newSeats.push(s); used++ } }
     }
 
