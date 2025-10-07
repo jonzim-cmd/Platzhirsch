@@ -455,7 +455,11 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
         gutter = perRow > 1 ? Math.max(0, (availInner - perRow * pairWidth) / (perRow - 1)) : 0
         x = leftBand
       } else {
-        x = marginX
+        // center within available inner width
+        const availW = Math.max(0, frameSize.w - marginX * 2)
+        const totalRowW = perRow * pairWidth + (perRow - 1) * gutter
+        const offset = Math.max(0, (availW - totalRowW) / 2)
+        x = marginX + offset
       }
       const y = marginY + r * (seatH + betweenRowsY)
       for (let c = 0; c < perRow; c++) {
@@ -863,15 +867,28 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
 
   const loadPlan = useCallback(async (create: boolean) => {
     if (!activeProfile?.id || !classId || !roomId) return
-    const qs = planId
-      ? `planId=${encodeURIComponent(planId)}&classId=${encodeURIComponent(classId)}&roomId=${encodeURIComponent(roomId)}&includeLead=1`
-      : `ownerProfileId=${encodeURIComponent(activeProfile.id)}&classId=${encodeURIComponent(classId)}&roomId=${encodeURIComponent(roomId)}&create=${create ? '1' : '0'}&includeLead=1`
-    const res = await fetch(`/api/plan?${qs}`)
-    if (!res.ok) return
-    const data = await res.json()
+    const qsById = `planId=${encodeURIComponent(planId || '')}&classId=${encodeURIComponent(classId)}&roomId=${encodeURIComponent(roomId)}&includeLead=1`
+    const qsByContext = `ownerProfileId=${encodeURIComponent(activeProfile.id)}&classId=${encodeURIComponent(classId)}&roomId=${encodeURIComponent(roomId)}&create=${create ? '1' : '0'}&includeLead=1`
+    // Prefer explicit planId if present, but verify it matches current context
+    let data: any = null
+    if (planId) {
+      const r1 = await fetch(`/api/plan?${qsById}`)
+      if (r1.ok) {
+        const d1 = await r1.json()
+        if (d1?.plan && d1.plan.classId === classId && d1.plan.roomId === roomId && d1.plan.ownerProfileId ? true : true) {
+          data = d1
+        }
+      }
+    }
+    // Fallback to context-based default/creation
+    if (!data) {
+      const r2 = await fetch(`/api/plan?${qsByContext}`)
+      if (!r2.ok) return
+      data = await r2.json()
+    }
     setPlan(data.plan)
-    if (!planId) {
-      // synchronize discovered planId back to URL via storage event
+    // Synchronize planId if it changed or was missing
+    if (!planId || planId !== data.plan.id) {
       try {
         const url = new URL(window.location.href)
         url.searchParams.set('pl', data.plan.id)
@@ -882,7 +899,37 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
     }
     setLeadPlan(data.leadPlan)
     // Convert legacy groupId relations to explicit joints on load
-    const rawEls: Element[] = data.plan.elements.map((e: any) => ({ ...e }))
+    // 1) Sanitize elements from server (defensive against legacy/broken data)
+    const rawElsInput: any[] = Array.isArray(data.plan.elements) ? data.plan.elements : []
+    let rawEls: Element[] = rawElsInput
+      .filter((e: any) => e && typeof e === 'object')
+      .map((e: any) => ({
+        id: String(e.id || ''),
+        type: e.type,
+        refId: e.refId ?? null,
+        x: Number.isFinite(e.x) ? e.x : 0,
+        y: Number.isFinite(e.y) ? e.y : 0,
+        w: Number.isFinite(e.w) ? e.w : 80,
+        h: Number.isFinite(e.h) ? e.h : 50,
+        rotation: Number.isFinite(e.rotation) ? e.rotation : 0,
+        z: Number.isFinite(e.z) ? e.z : 0,
+        groupId: e.groupId ?? null,
+        meta: e.meta ?? null,
+      }))
+      .filter((e: any) => Number.isFinite(e.x) && Number.isFinite(e.y) && Number.isFinite(e.w) && Number.isFinite(e.h))
+    // 2) Normalize bars: ensure left side = WALL_SIDE, right side = WINDOW_SIDE
+    try {
+      const bars = rawEls.filter(e => e.type === 'WINDOW_SIDE' || e.type === 'WALL_SIDE')
+      if (bars.length >= 2) {
+        const mid = frameSize.w / 2
+        const left = bars.reduce((m, b) => (b.x < m.x ? b : m), bars[0])
+        const right = bars.reduce((m, b) => (b.x > m.x ? b : m), bars[0])
+        if (left && right) {
+          if (left.type !== 'WALL_SIDE') left.type = 'WALL_SIDE' as any
+          if (right.type !== 'WINDOW_SIDE') right.type = 'WINDOW_SIDE' as any
+        }
+      }
+    } catch {}
     const convertGroupsToJoints = (els: Element[]) => {
       const byId = new Map<string, Element>()
       const joints = new Map<string, Array<{ otherId: string; side: any; t: number; kind?: string; pairId?: string }>>()
@@ -970,7 +1017,20 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
   }, [activeProfile?.id, classId, roomId, planId, loadPlan])
 
   const scheduleSave = useCallback(() => {
-    if (!planRef.current) return
+    if (!planRef.current) {
+      // plan not ready yet: retry shortly once
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      saveTimer.current = setTimeout(() => {
+        if (planRef.current) {
+          setSaving('saving')
+          fetch('/api/plan', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ planId: planRef.current!.id, elements: elementsRef.current })
+          }).then(() => { setSaving('saved'); setTimeout(() => setSaving('idle'), 1200) }).catch(() => setSaving('idle'))
+        }
+      }, 500)
+      return
+    }
     if (saveTimer.current) clearTimeout(saveTimer.current)
     setSaving('saving')
     saveTimer.current = setTimeout(async () => {

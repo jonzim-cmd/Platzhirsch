@@ -67,7 +67,11 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
 
   // Suggested rooms for onboarding (can be adjusted/extended by user)
   const [roomSuggestions, setRoomSuggestions] = useState<string[]>(['W11','W12','W13','W14','W21','W22','W23','W24'])
-  const [classSuggestions, setClassSuggestions] = useState<string[]>([...Array.from({length:7}, (_,i)=>`10${String.fromCharCode(65+i)}`), ...Array.from({length:4},(_,i)=>`11${String.fromCharCode(65+i)}`)])
+  const [classSuggestions, setClassSuggestions] = useState<string[]>([
+    ...Array.from({length:7}, (_,i)=>`10${String.fromCharCode(65+i)}`),
+    ...Array.from({length:4},(_,i)=>`11${String.fromCharCode(65+i)}`),
+    '11Z'
+  ])
   // Rooms per assigned class (by classId if known, else by name prefixed with name:)
   const [classRooms, setClassRooms] = useState<Record<string, Set<string>>>({})
 
