@@ -1512,56 +1512,37 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
     autoCenterDoneRef.current = true
   }, [elements, frameSize.w, readOnly])
 
-  // Responsive re-centering/panning on container resize
-  // When the frame shrinks and content would overflow, pan the content back into view.
+  // Proportional scale student layout on resize; then realign edge-anchored elements
+  const prevFrameForScale = useRef<{ w: number; h: number } | null>(null)
   useEffect(() => {
+    const prev = prevFrameForScale.current
+    prevFrameForScale.current = { w: frameSize.w, h: frameSize.h }
+    if (!prev) return
     if (readOnly) return
-    if (!elements || elements.length === 0) return
-    // Compute visual bounds considering rotation
-    let minL = Infinity, maxR = -Infinity, minT = Infinity, maxB = -Infinity
-    for (const el of elements) {
-      const rot = (((el.rotation || 0) % 360) + 360) % 360
-      const rad = rot * Math.PI / 180
-      const cos = Math.cos(rad)
-      const sin = Math.sin(rad)
-      const bbW = Math.abs(el.w * cos) + Math.abs(el.h * sin)
-      const bbH = Math.abs(el.w * sin) + Math.abs(el.h * cos)
-      const cx = el.x + el.w / 2
-      const cy = el.y + el.h / 2
-      const left = cx - bbW / 2
-      const right = cx + bbW / 2
-      const top = cy - bbH / 2
-      const bottom = cy + bbH / 2
-      if (left < minL) minL = left
-      if (right > maxR) maxR = right
-      if (top < minT) minT = top
-      if (bottom > maxB) maxB = bottom
-    }
-    if (!isFinite(minL) || !isFinite(maxR) || !isFinite(minT) || !isFinite(maxB)) return
-    const contentW = Math.max(0, maxR - minL)
-    const contentH = Math.max(0, maxB - minT)
     const margin = 16
-    let dx = 0, dy = 0
-    // Horizontal: center if it fits, otherwise ensure at least one side margin is respected
-    if (contentW + margin * 2 <= frameSize.w) {
-      dx = (frameSize.w - contentW) / 2 - minL
-    } else {
-      if (minL > margin && maxR > frameSize.w - margin) dx = (frameSize.w - margin) - maxR
-      else if (minL < margin) dx = margin - minL
-      else dx = 0
-    }
-    // Vertical: center if it fits, otherwise ensure top/bottom margin
-    if (contentH + margin * 2 <= frameSize.h) {
-      dy = (frameSize.h - contentH) / 2 - minT
-    } else {
-      if (minT > margin && maxB > frameSize.h - margin) dy = (frameSize.h - margin) - maxB
-      else if (minT < margin) dy = margin - minT
-      else dy = 0
-    }
-    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return
-    setElements(prev => prev.map(el => ({ ...el, x: el.x + dx, y: el.y + dy })))
-    scheduleSave()
-  }, [frameSize.w, frameSize.h, elements, readOnly])
+    const oldInnerW = Math.max(1, prev.w - 2 * margin)
+    const newInnerW = Math.max(1, frameSize.w - 2 * margin)
+    const oldInnerH = Math.max(1, prev.h - 2 * margin)
+    const newInnerH = Math.max(1, frameSize.h - 2 * margin)
+    const sx = newInnerW / oldInnerW
+    const sy = newInnerH / oldInnerH
+    if (Math.abs(sx - 1) < 0.001 && Math.abs(sy - 1) < 0.001) return
+    setElements(prevEls => {
+      const scaled = prevEls.map(e => {
+        if (e.type !== 'STUDENT') return e
+        const nx = margin + (e.x - margin) * sx
+        const ny = margin + (e.y - margin) * sy
+        const nw = e.w * sx
+        const nh = e.h * sy
+        return { ...e, x: nx, y: ny, w: nw, h: nh }
+      })
+      return realignFixedElements(scaled)
+    })
+  }, [frameSize.w, frameSize.h, readOnly])
+
+  // Removed element-mutation-based resize behavior in favor of view transform
+
+  
   
   // Keyboard: copy/paste/select-all/delete
   useEffect(() => {
