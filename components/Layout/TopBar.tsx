@@ -129,6 +129,20 @@ export function TopBar() {
     }
   }, [creatingProfile, renamingProfile])
 
+  // Keep local sidebar state in sync with global storage events
+  useEffect(() => {
+    const onSidebar = (e: StorageEvent) => {
+      if (e.key === 'sidebar' && e.newValue) {
+        try {
+          const v = JSON.parse(e.newValue)
+          setSidebarOpen(!!v.open)
+        } catch {}
+      }
+    }
+    window.addEventListener('storage', onSidebar)
+    return () => window.removeEventListener('storage', onSidebar)
+  }, [])
+
   // whenever profile changes, load its classes
   useEffect(() => {
     if (!activeProfile) { setClasses([]); updateUrl(undefined, undefined, undefined, undefined); return }

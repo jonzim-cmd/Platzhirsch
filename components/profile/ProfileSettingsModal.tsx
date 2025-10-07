@@ -43,6 +43,10 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
   const classesBlockRef = useRef<HTMLDivElement | null>(null)
   // Explicit selection for "Meine Klassenleitung" (per current profile)
   const [leadSelection, setLeadSelection] = useState<string>('')
+  // Baselines to compute diffs and reduce unnecessary network calls
+  const baselineRowsRef = useRef<ClassRow[]>([])
+  const baselineProfileRef = useRef<string | null>(null)
+  const baselineLeadIdRef = useRef<string | null>(null)
 
   // Students tab
   const [studentClassId, setStudentClassId] = useState('')
@@ -98,14 +102,23 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
           const data = await fetchJsonSafe<any[]>(r)
           return Array.isArray(data) ? data : []
         })
-        .then(setRows)
+        .then((data) => {
+          setRows(data)
+          baselineRowsRef.current = data
+          baselineProfileRef.current = pid
+          baselineLeadIdRef.current = (data.find(x => x.leadProfileId === pid)?.id || null)
+        })
         .catch(async () => {
           const all = await fetchWithTimeout('/api/classes').then(async (r) => {
             if (!r.ok) return [] as any[]
             const data = await fetchJsonSafe<any[]>(r)
             return Array.isArray(data) ? data : []
           })
-          setRows(all.map((c:any)=>({ id:c.id, name:c.name, assigned:false, leadProfileId: c.leadProfileId ?? null })))
+          const init = all.map((c:any)=>({ id:c.id, name:c.name, assigned:false, leadProfileId: c.leadProfileId ?? null }))
+          setRows(init)
+          baselineRowsRef.current = init
+          baselineProfileRef.current = pid
+          baselineLeadIdRef.current = (init.find(x => x.leadProfileId === pid)?.id || null)
         })
       // Rooms
       fetchWithTimeout('/api/rooms').then(async (r) => setRooms(await r.json())).catch(()=>setRooms([]))
@@ -210,29 +223,50 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
         return created
       }
 
-      // apply membership toggles (create classes as needed)
+      // Ensure class IDs for newly added suggestion-rows that are assigned (parallel)
+      const ensureTasks: Promise<any>[] = []
       for (const r of rows) {
-        if (!r.id && r.assigned) {
-          const created = await ensureClass(r.name)
-          r.id = created.id
+        if (!r.id && r.assigned) ensureTasks.push(ensureClass(r.name).then(created => { r.id = created.id }))
+      }
+      if (ensureTasks.length) await Promise.all(ensureTasks)
+
+      // Prepare baseline map for diffs
+      const baselineMap = new Map<string, ClassRow>()
+      for (const b of baselineRowsRef.current || []) baselineMap.set(b.id || `name:${b.name}`,(b))
+
+      // Membership: only send changes
+      const membershipTasks: Promise<any>[] = []
+      for (const r of rows) {
+        const key = r.id || `name:${r.name}`
+        const prev = baselineMap.get(key)
+        const changedAssign = (prev?.assigned ?? false) !== (!!r.assigned)
+        if (r.id && changedAssign) {
+          membershipTasks.push(
+            fetch('/api/profile-classes', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ profileId: pid, classId: r.id, assigned: !!r.assigned })
+            })
+          )
         }
-        const shouldAssign = !!r.assigned
-        if (r.id) await fetch('/api/profile-classes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: pid, classId: r.id, assigned: shouldAssign }) })
       }
-      // apply lead toggle from explicit local selection
+
+      // Lead toggle: update only if changed
       const leadKey = leadSelection
-      const leadId = rows.find(r => (r.id || `name:${r.name}`) === leadKey)?.id || null
-      for (const r of rows) {
-        if (!r.id) continue
-        const wantLead = leadId === r.id
-        await fetch('/api/class/lead', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ classId: r.id, leadProfileId: wantLead ? pid : null }) })
+      const newLeadId = rows.find(r => (r.id || `name:${r.name}`) === leadKey)?.id || null
+      const prevLeadId = baselineLeadIdRef.current
+      const leadTasks: Promise<any>[] = []
+      if (prevLeadId !== newLeadId) {
+        if (prevLeadId) leadTasks.push(fetch('/api/class/lead', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ classId: prevLeadId, leadProfileId: null }) }))
+        if (newLeadId) leadTasks.push(fetch('/api/class/lead', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ classId: newLeadId, leadProfileId: pid }) }))
       }
-      // create selected rooms (union across all class selections)
+
+      // Rooms: ensure existence (best effort, parallel)
       const allSelectedRooms = new Set<string>()
       for (const key of Object.keys(classRooms)) for (const r of classRooms[key]) allSelectedRooms.add(r)
-      for (const roomName of allSelectedRooms) {
-        try { await fetch('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: roomName }) }) } catch {}
-      }
+      const roomTasks: Promise<any>[] = []
+      for (const roomName of allSelectedRooms) roomTasks.push(fetch('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: roomName }) }).catch(()=>undefined))
+
+      await Promise.all([...membershipTasks, ...leadTasks, ...roomTasks])
 
       // persist class->rooms mapping in localStorage (by classId)
       try {
@@ -255,6 +289,10 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
         localStorage.setItem('dataChanged', JSON.stringify({ t: stamp, p: pid }))
         window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: JSON.stringify({ t: stamp, p: pid }) }))
       } catch {}
+      // update baselines after successful save
+      baselineRowsRef.current = rows.map(r => ({ ...r }))
+      baselineProfileRef.current = pid
+      baselineLeadIdRef.current = newLeadId || null
     } finally {
       setLoading(false)
     }
@@ -398,7 +436,10 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                             const p = allProfiles.find(x=>x.id===v)
                             setName(p?.name || '')
                             // reload rows and plans for selected profile
-                            fetch(`/api/profile-classes?profileId=${v}`).then(r=>r.json()).then(setRows).catch(()=>setRows([]))
+                            fetch(`/api/profile-classes?profileId=${v}`)
+                              .then(r=>r.json())
+                              .then((data)=>{ setRows(data); baselineRowsRef.current = data; baselineProfileRef.current = v; baselineLeadIdRef.current = (data.find((x:any)=>x.leadProfileId===v)?.id || null) })
+                              .catch(()=>{ setRows([]); baselineRowsRef.current = []; baselineProfileRef.current = v; baselineLeadIdRef.current = null })
                             fetch('/api/rooms').then(r=>r.json()).then(setRooms).catch(()=>setRooms([]))
                             fetch(`/api/plans?ownerProfileId=${v}&all=1`).then(r=>r.json()).then(d=>setPlans(d?.plans||[])).catch(()=>setPlans([]))
                             try {
@@ -534,7 +575,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                       onClick={saveProfileBasics}
                       disabled={loading || !name.trim()}
                     >
-                      {justSaved ? 'Gespeichert' : 'Speichern'}
+                      {loading ? 'Speichern…' : (justSaved ? 'Gespeichert' : 'Speichern')}
                     </Button>
                   </div>
                 </div>

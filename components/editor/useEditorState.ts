@@ -22,7 +22,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const elementRefs = useRef<Map<string, HTMLElement>>(new Map())
   const saveTimer = useRef<NodeJS.Timeout | null>(null)
-  const [clipboard, setClipboard] = useState<Element | null>(null)
+  const [clipboard, setClipboard] = useState<Element[] | null>(null)
   // History (undo/redo) for element state
   const historyRef = useRef<{ past: Element[][]; future: Element[][] }>({ past: [], future: [] })
   const [canUndo, setCanUndo] = useState(false)
@@ -467,10 +467,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
         const leftSeat: Element = { id: uid('el'), type: 'STUDENT', refId: null, x, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
         const rightSeat: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: x + seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 1, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
         // joints left.right <-> right.left at mid, mark as pair with shared pairId
-        const add = (arr: any[]|undefined, item:any)=>Array.isArray(arr)?[...arr,item]:[item]
-        const pairId = uid('pair')
-        leftSeat.meta = { ...(leftSeat.meta||{}), joints: add(leftSeat.meta?.joints, { otherId: rightSeat.id, side: 'right', t: 0.5, kind: 'pair', pairId }) }
-        rightSeat.meta = { ...(rightSeat.meta||{}), joints: add(rightSeat.meta?.joints, { otherId: leftSeat.id, side: 'left', t: 0.5, kind: 'pair', pairId }) }
+        // No automatic joints between paired seats; connections are manual.
 
         newSeats.push(leftSeat, rightSeat)
         pairIndex++
@@ -578,10 +575,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
         lpB_y = rcy - seatH / 2
       }
       const lpB: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: lpB_x, y: lpB_y, w: seatW, h: seatH, rotation: leftAngle, z: newSeats.length + 1, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
-      const add = (arr: any[]|undefined, item:any)=>Array.isArray(arr)?[...arr,item]:[item]
-      const lPairId = uid('pair')
-      lpA.meta = { ...(lpA.meta||{}), joints: add(lpA.meta?.joints, { otherId: lpB.id, side: 'right', t: 0.5, kind: 'pair', pairId: lPairId }) }
-      lpB.meta = { ...(lpB.meta||{}), joints: add(lpB.meta?.joints, { otherId: lpA.id, side: 'left', t: 0.5, kind: 'pair', pairId: lPairId }) }
+      // No automatic joints for the left pair; connections are manual.
       // Center 4
       const centerX = leftPairX + leftPairSpanX + gapBetweenGroups
       const c1: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 0 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 2, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
@@ -605,9 +599,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
         rpB_y = rcy - seatH / 2
       }
       const rpB: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: rpB_x, y: rpB_y, w: seatW, h: seatH, rotation: rightAngle, z: newSeats.length + 7, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
-      const rPairId = uid('pair')
-      rpA.meta = { ...(rpA.meta||{}), joints: add(rpA.meta?.joints, { otherId: rpB.id, side: 'right', t: 0.5, kind: 'pair', pairId: rPairId }) }
-      rpB.meta = { ...(rpB.meta||{}), joints: add(rpB.meta?.joints, { otherId: rpA.id, side: 'left', t: 0.5, kind: 'pair', pairId: rPairId }) }
+      // No automatic joints for the right pair; connections are manual.
 
       const rowSeats = [lpA, lpB, c1, c2, c3, c4, rpA, rpB]
       for (const s of rowSeats) { if (used < n) { newSeats.push(s); used++ } }
@@ -1122,6 +1114,65 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
       historyCommit()
       setElements(prev => prev.map(e => e.id === id ? { ...e, meta: { ...(e.meta || {}), joints: [] } } : e))
     }
+    // Generic swap for non-students: restricted to matching pairs (WALL<->WINDOW, TEACHER<->DOOR)
+    if (srcEl.type !== 'STUDENT') {
+      const sourceGroupIds = getGroupIds([srcEl.id!])
+      const a = srcEl
+      const aArea = Math.max(1, a.w * a.h)
+      const bbox = (el: Element) => {
+        const rot = (((el.rotation || 0) % 360) + 360) % 360
+        const rad = rot * Math.PI / 180
+        const cos = Math.cos(rad)
+        const sin = Math.sin(rad)
+        const bbW = Math.abs(el.w * cos) + Math.abs(el.h * sin)
+        const bbH = Math.abs(el.w * sin) + Math.abs(el.h * cos)
+        const cx = el.x + el.w / 2
+        const cy = el.y + el.h / 2
+        return { left: cx - bbW / 2, top: cy - bbH / 2, right: cx + bbW / 2, bottom: cy + bbH / 2, cx, cy, bbW, bbH }
+      }
+      const isBar = (t: ElementType) => (t === 'WALL_SIDE' || t === 'WINDOW_SIDE')
+      const isTeachDoor = (t: ElementType) => (t === 'TEACHER_DESK' || t === 'DOOR')
+      const allowType = (t: ElementType) => (isBar(a.type) && isBar(t)) || (isTeachDoor(a.type) && isTeachDoor(t))
+      const candidates = elements.filter(e => e.id !== a.id && allowType(e.type) && !sourceGroupIds.includes(e.id!))
+      let target: Element | null = null
+      let best = 0
+      for (const e of candidates) {
+        const ab = bbox(a)
+        const eb = bbox(e)
+        // Prefer: center of dragged element inside target's rotated AABB
+        const inside = (ab.cx >= eb.left && ab.cx <= eb.right && ab.cy >= eb.top && ab.cy <= eb.bottom)
+        if (inside) { target = e; best = 2; break }
+        // Fallback: overlap ratio of rotated AABBs
+        const left = Math.max(ab.left, eb.left)
+        const right = Math.min(ab.right, eb.right)
+        const top = Math.max(ab.top, eb.top)
+        const bottom = Math.min(ab.bottom, eb.bottom)
+        const inter = Math.max(0, right - left) * Math.max(0, bottom - top)
+        const denom = Math.min(ab.bbW * ab.bbH, eb.bbW * eb.bbH)
+        const ratio = denom > 0 ? inter / denom : 0
+        if (ratio >= 0.5 && ratio > best) { best = ratio; target = e }
+      }
+      if (target) {
+        historyCommit()
+        const start = dragStartPositions.current
+        const srcStart = start.get(a.id!) || { x: a.x, y: a.y }
+        const targetPos = { x: target.x, y: target.y }
+        const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+        const doClamp = !isBar(a.type) // do not clamp bars (wall/window), keep exact swap
+        const srcNewX = doClamp ? clamp(targetPos.x, 0, Math.max(0, frameSize.w - a.w)) : targetPos.x
+        const srcNewY = doClamp ? clamp(targetPos.y, 0, Math.max(0, frameSize.h - a.h)) : targetPos.y
+        const tgtNewX = doClamp ? clamp(srcStart.x, 0, Math.max(0, frameSize.w - target.w)) : srcStart.x
+        const tgtNewY = doClamp ? clamp(srcStart.y, 0, Math.max(0, frameSize.h - target.h)) : srcStart.y
+        setElements(prev => prev.map(e => {
+          if (e.id === a.id) return { ...e, x: srcNewX, y: srcNewY }
+          if (e.id === target.id) return { ...e, x: tgtNewX, y: tgtNewY }
+          return e
+        }))
+        scheduleSave()
+        return
+      }
+    }
+
     // if dragged over >=50% of another student seat: perform swap semantics
     if (srcEl.type === 'STUDENT') {
       const getStudentPairPartner = (el: Element): { partner?: Element } | null => {
@@ -1496,31 +1547,38 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
       }
       if (mod && e.key.toLowerCase() === 'c') {
         e.preventDefault()
-        if (!primarySelectedId) return
-        const el = elements.find(x => x.id === primarySelectedId)
-        if (el) setClipboard({ ...el })
+        // Copy all selected elements; if none, copy primary if present
+        const ids = selectedIds.length > 0 ? selectedIds : (primarySelectedId ? [primarySelectedId] : [])
+        if (ids.length === 0) return
+        const copied = elements.filter(x => ids.includes(x.id!)).map(x => ({ ...x }))
+        setClipboard(deepClone(copied))
         return
       }
       if (mod && e.key.toLowerCase() === 'v') {
         e.preventDefault()
-        if (readOnly || !clipboard) return
-        // Paste near current selection or at default
-        const baseX = selected?.x ?? (sidebarOpen ? 320 : 120)
-        const baseY = selected?.y ?? 120
-        if (clipboard.type === 'STUDENT') {
-          const used = new Set(elements.filter(e => e.type === 'STUDENT' && e.refId).map(e => String(e.refId)))
-          const candidate = students.find(s => !used.has(String(s.id)))
-          if (candidate) {
-            addElement('STUDENT', candidate.id, { x: baseX + 16, y: baseY + 16 })
-          } else {
-            // If no free student left, duplicate as empty placeholder
-            addElement('STUDENT', undefined, { x: baseX + 16, y: baseY + 16 })
-          }
-        } else {
-          const clone = { ...clipboard }
-          // Ignore id and groupId, offset position
-          addElement(clone.type, clone.refId ?? undefined, { x: baseX + 16, y: baseY + 16 })
-        }
+        if (readOnly || !clipboard || clipboard.length === 0) return
+        historyCommit()
+        // Exact paste: keep original positions/rotations/sizes; remap IDs and internal joints
+        const idMap = new Map<string, string>()
+        for (const el of clipboard) idMap.set(el.id!, uid('el'))
+        const selectedIdSet = new Set(clipboard.map(el => el.id!))
+        // preserve relative z-order: sort by original z asc
+        const toAdd = clipboard.slice().sort((a, b) => (a.z || 0) - (b.z || 0)).map((src, idx) => {
+          const newId = idMap.get(src.id!)!
+          const jointsSrc: any[] = Array.isArray(src.meta?.joints) ? (src.meta!.joints as any[]) : []
+          const joints = jointsSrc
+            .filter(j => selectedIdSet.has(String(j.otherId)))
+            .map(j => ({ ...j, otherId: idMap.get(String(j.otherId))! }))
+          return {
+            ...src,
+            id: newId,
+            groupId: null,
+            meta: { ...(src.meta || {}), joints },
+          } as Element
+        })
+        setElements(prev => [...prev, ...toAdd])
+        setSelectedIds(toAdd.map(e => e.id!))
+        scheduleSave()
         return
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -1759,12 +1817,9 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
         placedX = marginX
         placedY = marginY
       }
-      const pairId = uid('pair')
       const leftSeat: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: placedX, y: placedY, w: seatW, h: seatH, rotation: 0, z: elements.length, groupId: null, meta: { fontSize: baseFont } }
       const rightSeat: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: placedX + seatW, y: placedY, w: seatW, h: seatH, rotation: 0, z: elements.length + 1, groupId: null, meta: { fontSize: baseFont } }
-      const add = (arr: any[]|undefined, item:any)=>Array.isArray(arr)?[...arr,item]:[item]
-      leftSeat.meta = { ...(leftSeat.meta||{}), joints: add(leftSeat.meta?.joints, { otherId: rightSeat.id, side: 'right', t: 0.5, kind: 'pair', pairId }) }
-      rightSeat.meta = { ...(rightSeat.meta||{}), joints: add(rightSeat.meta?.joints, { otherId: leftSeat.id, side: 'left', t: 0.5, kind: 'pair', pairId }) }
+      // No automatic joints between created paired seats; connections are manual.
       // Assign new student to the first free seat (left by default)
       if (refId) leftSeat.refId = refId
       setElements(prev => [...prev, leftSeat, rightSeat])
