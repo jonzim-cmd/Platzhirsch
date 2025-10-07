@@ -49,7 +49,7 @@ function SaveGroup() {
     return () => { alive = false }
   }, [canShare, plan?.id])
   return (
-    <div className="mr-2 flex items-center gap-2 rounded bg-bg pl-2 pr-0 py-1">
+    <div className="mr-2 flex items-center gap-2 rounded bg-neutral-900/20 px-1 py-0.5">
       <div className="leading-none text-fg-muted select-none">
         {saving === 'saving' && <span>Speichern…</span>}
         {saving === 'saved' && <span className="text-primary">Gespeichert</span>}
@@ -57,15 +57,16 @@ function SaveGroup() {
       {leadPlan && (
         <div className="flex items-center gap-2 pr-1">
           <span className="text-fg-muted">Ansicht:</span>
-          <Button onClick={() => setViewMode('owner')} className={viewMode==='owner'?'text-primary':''}>Eigen</Button>
-          <Button onClick={() => setViewMode('lead')} className={viewMode==='lead'?'text-primary':''}>KL</Button>
+          <Button size="xs" variant="subtle" onClick={() => setViewMode('owner')} className={viewMode==='owner'?'text-primary':''}>Eigen</Button>
+          <Button size="xs" variant="subtle" onClick={() => setViewMode('lead')} className={viewMode==='lead'?'text-primary':''}>KL</Button>
         </div>
       )}
       {canShare && (
         <div className="flex items-center gap-2 pr-1">
           {!shared && (
             <Button
-              variant="primary"
+              size="xs"
+              variant="subtle"
               disabled={shareBusy}
               onClick={async () => {
                 setShareBusy(true)
@@ -75,11 +76,14 @@ function SaveGroup() {
                   setToast('shared'); setTimeout(() => setToast(null), 1200)
                 } finally { setShareBusy(false) }
               }}
-            >Freigeben</Button>
+            >
+              <span className="text-primary">Freigeben</span>
+            </Button>
           )}
           {shared && (
             <Button
-              variant="danger"
+              size="xs"
+              variant="subtle"
               disabled={shareBusy}
               onClick={async () => {
                 setShareBusy(true)
@@ -89,7 +93,9 @@ function SaveGroup() {
                   setToast('unshared'); setTimeout(() => setToast(null), 1200)
                 } finally { setShareBusy(false) }
               }}
-            >Freigabe aufheben</Button>
+            >
+              <span className="text-red-300">Freigabe aufheben</span>
+            </Button>
           )}
           {toast === 'shared' && <span className="text-primary">Freigegeben</span>}
           {toast === 'unshared' && <span className="text-fg-muted">Freigabe aufgehoben</span>}
