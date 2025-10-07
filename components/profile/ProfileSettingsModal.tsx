@@ -79,14 +79,26 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
   // Rooms per assigned class (by classId if known, else by name prefixed with name:)
   const [classRooms, setClassRooms] = useState<Record<string, Set<string>>>({})
 
-  function addRoomSuggestion(name: string) {
+  async function addRoomSuggestion(name: string) {
     const n = name.trim()
     if (!n) return
+    try {
+      const rs = await fetch('/api/rooms').then(r=>r.json()).catch(()=>[])
+      if (Array.isArray(rs) && rs.some((r: any) => (r?.name || '').toLowerCase() === n.toLowerCase())) {
+        alert(`Raum "${n}" existiert bereits.`)
+      }
+    } catch {}
     setRoomSuggestions(prev => (prev.includes(n) ? prev : [...prev, n]))
   }
-  function addClassSuggestion(name: string) {
+  async function addClassSuggestion(name: string) {
     const n = name.trim()
     if (!n) return
+    try {
+      const cs = await fetch('/api/classes').then(r=>r.json()).catch(()=>[])
+      if (Array.isArray(cs) && cs.some((c: any) => (c?.name || '').toLowerCase() === n.toLowerCase())) {
+        alert(`Klasse "${n}" existiert bereits.`)
+      }
+    } catch {}
     setClassSuggestions(prev => (prev.includes(n) ? prev : [...prev, n]))
   }
 
@@ -273,8 +285,19 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
       // Rooms: ensure existence (best effort, parallel)
       const allSelectedRooms = new Set<string>()
       for (const key of Object.keys(classRooms)) for (const r of classRooms[key]) allSelectedRooms.add(r)
+      const roomWarned = new Set<string>()
       const roomTasks: Promise<any>[] = []
-      for (const roomName of allSelectedRooms) roomTasks.push(fetch('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: roomName }) }).catch(()=>undefined))
+      for (const roomName of allSelectedRooms) {
+        roomTasks.push((async () => {
+          try {
+            const res = await fetch('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: roomName }) })
+            if (res.status === 409 && !roomWarned.has(roomName)) {
+              roomWarned.add(roomName)
+              alert(`Raum "${roomName}" existiert bereits.`)
+            }
+          } catch { /* ignore */ }
+        })())
+      }
 
       await Promise.all([...membershipTasks, ...leadTasks, ...roomTasks])
 
@@ -520,7 +543,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                           placeholder="Klassen wählen…"
                           className="w-56"
                         />
-                        <Button size="sm" className="h-9" onClick={()=>{ const v = prompt('Fehlende Klasse eingeben:','')||''; if (v.trim()) addClassSuggestion(v.trim()) }}>+ fehlende Klasse</Button>
+                        <Button size="sm" className="h-9" onClick={async ()=>{ const v = prompt('Fehlende Klasse eingeben:','')||''; if (v.trim()) await addClassSuggestion(v.trim()) }}>+ fehlende Klasse</Button>
                       </div>
                     </div>
                     <div>
@@ -556,7 +579,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                         placeholder="Räume wählen…"
                         className="w-56"
                       />
-                      <Button size="sm" className="h-9" onClick={()=>{ const v = prompt('Fehlenden Raum hinzufügen:','')||''; if (v.trim()) addRoomSuggestion(v.trim()) }}>+ fehlender Raum</Button>
+                      <Button size="sm" className="h-9" onClick={async ()=>{ const v = prompt('Fehlenden Raum hinzufügen:','')||''; if (v.trim()) await addRoomSuggestion(v.trim()) }}>+ fehlender Raum</Button>
                     </div>
                   </div>
                 </div>

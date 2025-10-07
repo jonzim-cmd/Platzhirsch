@@ -104,19 +104,21 @@ function SaveGroup() {
           {toast === 'unshared' && <span className="text-fg-muted">Freigabe aufgehoben</span>}
         </div>
       )}
-      <button
-        type="button"
-        aria-label="Rückgängig"
-        title="Rückgängig (⌘Z / Ctrl+Z)"
-        disabled={disabled}
-        onClick={() => undo?.()}
-        className="inline-flex items-center justify-center rounded text-fg disabled:opacity-50 bg-neutral-950 hover:bg-neutral-950 px-3 py-1 focus:outline-none focus:ring-0"
-      >
+      <div className="rounded bg-neutral-950">
+        <button
+          type="button"
+          aria-label="Rückgängig"
+          title="Rückgängig (⌘Z / Ctrl+Z)"
+          disabled={disabled}
+          onClick={() => undo?.()}
+          className="inline-flex items-center justify-center rounded text-fg disabled:opacity-50 px-3 py-1 focus:outline-none focus:ring-0"
+        >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M3 7v6h6" />
           <path d="M3.51 15.49A9 9 0 1 0 5.64 5.64L3 8.29" />
         </svg>
-      </button>
+        </button>
+      </div>
     </div>
   )
 }
