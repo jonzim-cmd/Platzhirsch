@@ -1511,6 +1511,57 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
     scheduleSave()
     autoCenterDoneRef.current = true
   }, [elements, frameSize.w, readOnly])
+
+  // Responsive re-centering/panning on container resize
+  // When the frame shrinks and content would overflow, pan the content back into view.
+  useEffect(() => {
+    if (readOnly) return
+    if (!elements || elements.length === 0) return
+    // Compute visual bounds considering rotation
+    let minL = Infinity, maxR = -Infinity, minT = Infinity, maxB = -Infinity
+    for (const el of elements) {
+      const rot = (((el.rotation || 0) % 360) + 360) % 360
+      const rad = rot * Math.PI / 180
+      const cos = Math.cos(rad)
+      const sin = Math.sin(rad)
+      const bbW = Math.abs(el.w * cos) + Math.abs(el.h * sin)
+      const bbH = Math.abs(el.w * sin) + Math.abs(el.h * cos)
+      const cx = el.x + el.w / 2
+      const cy = el.y + el.h / 2
+      const left = cx - bbW / 2
+      const right = cx + bbW / 2
+      const top = cy - bbH / 2
+      const bottom = cy + bbH / 2
+      if (left < minL) minL = left
+      if (right > maxR) maxR = right
+      if (top < minT) minT = top
+      if (bottom > maxB) maxB = bottom
+    }
+    if (!isFinite(minL) || !isFinite(maxR) || !isFinite(minT) || !isFinite(maxB)) return
+    const contentW = Math.max(0, maxR - minL)
+    const contentH = Math.max(0, maxB - minT)
+    const margin = 16
+    let dx = 0, dy = 0
+    // Horizontal: center if it fits, otherwise ensure at least one side margin is respected
+    if (contentW + margin * 2 <= frameSize.w) {
+      dx = (frameSize.w - contentW) / 2 - minL
+    } else {
+      if (minL > margin && maxR > frameSize.w - margin) dx = (frameSize.w - margin) - maxR
+      else if (minL < margin) dx = margin - minL
+      else dx = 0
+    }
+    // Vertical: center if it fits, otherwise ensure top/bottom margin
+    if (contentH + margin * 2 <= frameSize.h) {
+      dy = (frameSize.h - contentH) / 2 - minT
+    } else {
+      if (minT > margin && maxB > frameSize.h - margin) dy = (frameSize.h - margin) - maxB
+      else if (minT < margin) dy = margin - minT
+      else dy = 0
+    }
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return
+    setElements(prev => prev.map(el => ({ ...el, x: el.x + dx, y: el.y + dy })))
+    scheduleSave()
+  }, [frameSize.w, frameSize.h, elements, readOnly])
   
   // Keyboard: copy/paste/select-all/delete
   useEffect(() => {
