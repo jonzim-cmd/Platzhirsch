@@ -569,97 +569,105 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
     const n = nStudents > 0 ? nStudents : existingSeats.length
     if (n === 0) return
 
+    // Seats to build with adjusted center rows
     const newSeats: Element[] = []
 
     const deg2rad = (deg: number) => (deg * Math.PI) / 180
-    // Build rows until all students are placed. Center block limited to 3 rows; sides continue.
-    for (let r = 0, used = 0; used < n && r < 100; r++) {
-      const y = marginY + r * (seatH + betweenRowsY)
-      // Compute total width of one row to center horizontally
-      let totalW: number
-      let leftPairSpanX: number
-      let rightPairSpanX: number
-      if (angled) {
-        const cos = Math.cos(deg2rad(10))
-        leftPairSpanX = seatW + seatW * cos
-        rightPairSpanX = seatW + seatW * cos
-        totalW = leftPairSpanX + betweenGroupsX + (4 * seatW) + betweenGroupsX + rightPairSpanX
-      } else {
-        leftPairSpanX = 2 * seatW
-        rightPairSpanX = 2 * seatW
-        totalW = leftPairSpanX + betweenGroupsX + (4 * seatW) + betweenGroupsX + rightPairSpanX
-      }
-      let startX: number
-      let gapBetweenGroups = betweenGroupsX
-      if (roomNameStartsWithW) {
-        const BAR_DEFAULT = 32; const G = 12; const OUTER = 16
-        const wall = elements.find(e => e.type === 'WALL_SIDE')
-        const win = elements.find(e => e.type === 'WINDOW_SIDE')
-        const leftBand = OUTER + (wall ? (wall.h || BAR_DEFAULT) : BAR_DEFAULT) + G
-        const rightBand = OUTER + (win ? (win.h || BAR_DEFAULT) : BAR_DEFAULT) + G
-        const availInner = Math.max(0, frameSize.w - leftBand - rightBand)
-        const blocksW = leftPairSpanX + (4 * seatW) + rightPairSpanX
-        const free = Math.max(0, availInner - blocksW)
-        gapBetweenGroups = free / 2
-        startX = leftBand
-      } else {
-        const availInner = frameSize.w
-        startX = Math.max(marginX, Math.floor((availInner - totalW) / 2))
-      }
-      // Left pair
-      const leftPairX = startX
-      // build left pair with exact edge-to-edge when angled
-      const leftAngle = angled ? -10 : 0
-      const lpA: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: leftPairX, y, w: seatW, h: seatH, rotation: leftAngle, z: newSeats.length, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
-      let lpB_x = leftPairX + seatW
-      let lpB_y = y
-      if (angled) {
-        const cx = lpA.x + seatW / 2
-        const cy = lpA.y + seatH / 2
-        const dx = seatW * Math.cos(deg2rad(leftAngle))
-        const dy = seatW * Math.sin(deg2rad(leftAngle))
-        const rcx = cx + dx
-        const rcy = cy + dy
-        lpB_x = rcx - seatW / 2
-        lpB_y = rcy - seatH / 2
-      }
-      const lpB: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: lpB_x, y: lpB_y, w: seatW, h: seatH, rotation: leftAngle, z: newSeats.length + 1, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
-      // No automatic joints for the left pair; connections are manual.
-      // Center 4 (only rows 0..2)
-      const centerX = leftPairX + leftPairSpanX + gapBetweenGroups
-      let centerSeats: Element[] = []
-      if (r < 3) {
-        const c1: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 0 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 2, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
-        const c2: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 1 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 3, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
-        const c3: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 2 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 4, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
-        const c4: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 3 * seatW, y, w: seatW, h: seatH, rotation: 0, z: newSeats.length + 5, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
-        centerSeats = [c1, c2, c3, c4]
-      }
-      // Right pair
-      const rightPairX = centerX + 4 * seatW + gapBetweenGroups
-      const rightAngle = angled ? 10 : 0
-      const rpA: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: rightPairX, y, w: seatW, h: seatH, rotation: rightAngle, z: newSeats.length + 6, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
-      let rpB_x = rightPairX + seatW
-      let rpB_y = y
-      if (angled) {
-        const cx = rpA.x + seatW / 2
-        const cy = rpA.y + seatH / 2
-        const dx = seatW * Math.cos(deg2rad(rightAngle))
-        const dy = seatW * Math.sin(deg2rad(rightAngle))
-        const rcx = cx + dx
-        const rcy = cy + dy
-        rpB_x = rcx - seatW / 2
-        rpB_y = rcy - seatH / 2
-      }
-      const rpB: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: rpB_x, y: rpB_y, w: seatW, h: seatH, rotation: rightAngle, z: newSeats.length + 7, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
-      // No automatic joints for the right pair; connections are manual.
 
-      const rowSeats = [lpA, lpB, ...centerSeats, rpA, rpB]
-      for (const s of rowSeats) { if (used < n) { newSeats.push(s); used++ } }
+    // Determine how many side rows are needed for total seats (sides exist every row; center only up to 3 rows)
+    const computeRows = (count: number) => {
+      if (count <= 0) return 0
+      if (count <= 24) return Math.ceil(count / 8) // up to 3 rows of 8
+      return 3 + Math.ceil((count - 24) / 4) // remaining rows of 4 (sides only)
+    }
+    const sideRows = computeRows(n)
+    const rowYs: number[] = Array.from({ length: sideRows }, (_, r) => marginY + r * (seatH + betweenRowsY))
+
+    // Center rows: align first and last with first/last side rows, interpolate evenly between
+    const centerRowCount = Math.min(3, sideRows)
+    const centerYs: number[] = (() => {
+      if (centerRowCount === 0) return []
+      if (centerRowCount === 1) return [rowYs[0]]
+      const top = rowYs[0]
+      const bottom = rowYs[sideRows - 1]
+      if (centerRowCount === 2) return [top, bottom]
+      // 3 rows: equal spacing between top and bottom
+      const mid = top + (bottom - top) / 2
+      return [top, mid, bottom]
+    })()
+
+    // Compute horizontal positions once (identical for all rows)
+    let leftPairSpanX: number
+    let rightPairSpanX: number
+    if (angled) {
+      const cos = Math.cos(deg2rad(10))
+      leftPairSpanX = seatW + seatW * cos
+      rightPairSpanX = seatW + seatW * cos
+    } else {
+      leftPairSpanX = 2 * seatW
+      rightPairSpanX = 2 * seatW
+    }
+    const totalW = leftPairSpanX + betweenGroupsX + 4 * seatW + betweenGroupsX + rightPairSpanX
+
+    let startX: number
+    let gapBetweenGroups = betweenGroupsX
+    if (roomNameStartsWithW) {
+      const BAR_DEFAULT = 32; const G = 12; const OUTER = 16
+      const wall = elements.find(e => e.type === 'WALL_SIDE')
+      const win = elements.find(e => e.type === 'WINDOW_SIDE')
+      const leftBand = OUTER + (wall ? (wall.h || BAR_DEFAULT) : BAR_DEFAULT) + G
+      const rightBand = OUTER + (win ? (win.h || BAR_DEFAULT) : BAR_DEFAULT) + G
+      const availInner = Math.max(0, frameSize.w - leftBand - rightBand)
+      const blocksW = leftPairSpanX + 4 * seatW + rightPairSpanX
+      const free = Math.max(0, availInner - blocksW)
+      gapBetweenGroups = free / 2
+      startX = leftBand
+    } else {
+      const availInner = frameSize.w
+      startX = Math.max(marginX, Math.floor((availInner - totalW) / 2))
+    }
+    const centerX = startX + leftPairSpanX + gapBetweenGroups
+    const rightPairX = centerX + 4 * seatW + gapBetweenGroups
+
+    // Helpers for angled second seat position
+    const placeSecond = (x: number, y: number, angleDeg: number) => {
+      if (!angled || angleDeg === 0) return { x: x + seatW, y }
+      const cx = x + seatW / 2
+      const cy = y + seatH / 2
+      const dx = seatW * Math.cos(deg2rad(angleDeg))
+      const dy = seatW * Math.sin(deg2rad(angleDeg))
+      const rcx = cx + dx
+      const rcy = cy + dy
+      return { x: rcx - seatW / 2, y: rcy - seatH / 2 }
     }
 
+    // Build side rows (pairs only)
+    const leftAngle = angled ? -10 : 0
+    const rightAngle = angled ? 10 : 0
+    for (const y of rowYs) {
+      const lpA: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: startX, y, w: seatW, h: seatH, rotation: leftAngle, z: 0, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      const lpBPos = placeSecond(lpA.x, lpA.y, leftAngle)
+      const lpB: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: lpBPos.x, y: lpBPos.y, w: seatW, h: seatH, rotation: leftAngle, z: 0, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      const rpA: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: rightPairX, y, w: seatW, h: seatH, rotation: rightAngle, z: 0, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      const rpBPos = placeSecond(rpA.x, rpA.y, rightAngle)
+      const rpB: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: rpBPos.x, y: rpBPos.y, w: seatW, h: seatH, rotation: rightAngle, z: 0, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      newSeats.push(lpA, lpB, rpA, rpB)
+    }
+
+    // Build center block rows at interpolated Y positions
+    for (const y of centerYs) {
+      const c1: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 0 * seatW, y, w: seatW, h: seatH, rotation: 0, z: 0, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      const c2: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 1 * seatW, y, w: seatW, h: seatH, rotation: 0, z: 0, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      const c3: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 2 * seatW, y, w: seatW, h: seatH, rotation: 0, z: 0, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      const c4: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: centerX + 3 * seatW, y, w: seatW, h: seatH, rotation: 0, z: 0, groupId: null, meta: { fontSize: typeStyles['STUDENT'].fontSize } }
+      newSeats.push(c1, c2, c3, c4)
+    }
+
+    // Order seats by Y then X for stable assignment, then trim to n and set z
+    newSeats.sort((a, b) => (a.y - b.y) || (a.x - b.x))
+    const limitedSeats = newSeats.slice(0, n).map((e, i) => ({ ...e, z: i }))
     // Assign refIds: first loaded students, then keep any existing refIds if present
-    const assigned = newSeats.map((e, i) => {
+    const assigned = limitedSeats.map((e, i) => {
       if (i < nStudents) return { ...e, refId: students[i].id }
       const prevSeat = existingSeats[i]
       if (prevSeat) return { ...e, refId: prevSeat.refId ?? null }
