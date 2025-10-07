@@ -628,16 +628,11 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                 <div className="rounded border border-red-900 bg-red-950/20 p-3">
                   <div className="text-sm font-medium text-red-300 mb-1">Alle Daten löschen</div>
                   <div className="text-sm text-red-200 mb-2">Dieser Vorgang löscht unwiderruflich ALLE Daten: Profile, Klassen, Räume, Schüler, Pläne und Elemente.</div>
-                  <div className="grid gap-3">
-                    <FormRow label="Zur Bestätigung tippe: LÖSCHEN">
-                      <input
-                        className="w-56 h-9 rounded bg-neutral-950 border border-neutral-800 px-2 text-sm"
-                        value={adminConfirm}
-                        onChange={(e)=>setAdminConfirm(e.target.value)}
-                        placeholder="LÖSCHEN"
-                      />
+                  <div className="grid gap-2">
+                    <label className="text-xs text-fg-muted">Zur Bestätigung tippe: LÖSCHEN</label>
+                    <input className="w-56 rounded bg-neutral-950 border border-neutral-800 px-2 py-1 text-sm" value={adminConfirm} onChange={(e)=>setAdminConfirm(e.target.value)} placeholder="LÖSCHEN" />
+                    <div className="flex gap-2">
                       <Button
-                        className="h-9"
                         variant="danger"
                         disabled={adminConfirm !== 'LÖSCHEN' || adminDeleting}
                         onClick={async () => {
@@ -666,7 +661,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                       >
                         {adminDeleting ? 'Lösche…' : 'Wirklich ALLES löschen'}
                       </Button>
-                    </FormRow>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -677,9 +672,9 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                 <div className="text-sm text-fg-muted">Unumkehrbare Aktionen</div>
                 <div className="rounded border border-neutral-900 p-3">
                   <div className="mb-2">Zum Bestätigen Profilnamen eingeben und löschen:</div>
-                  <div className="flex gap-2 items-center">
-                    <Input label="Profilname bestätigen" value={name} onChange={(e)=>setName(e.target.value)} />
-                    <Button
+                  <FormRow label="Profilname bestätigen">
+                    <InlineInput className="w-56" value={name} onChange={(e)=>setName(e.target.value)} />
+                    <Button className="h-9"
                       variant="danger"
                       onClick={async () => {
                         if (!profile?.id) return
@@ -699,7 +694,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                         onClose(true)
                       }}
                     >Profil löschen</Button>
-                  </div>
+                  </FormRow>
                 </div>
               </div>
             )}

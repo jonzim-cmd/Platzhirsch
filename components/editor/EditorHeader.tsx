@@ -49,13 +49,13 @@ function SaveGroup() {
     return () => { alive = false }
   }, [canShare, plan?.id])
   return (
-    <div className="mr-2 flex items-center gap-2 rounded bg-neutral-900/20 px-1 py-0.5">
+    <div className="mr-2 flex items-center gap-2">
       <div className="leading-none text-fg-muted select-none">
         {saving === 'saving' && <span>Speichern…</span>}
         {saving === 'saved' && <span className="text-primary">Gespeichert</span>}
       </div>
       {leadPlan && (
-        <div className="flex items-center gap-2 pr-1">
+        <div className="flex items-center gap-2 bg-neutral-950 px-1 py-0.5">
           <span className="text-fg-muted">Ansicht:</span>
           <Button size="xs" variant="subtle" onClick={() => setViewMode('owner')} className={viewMode==='owner'?'text-primary':''}>Eigen</Button>
           <Button size="xs" variant="subtle" onClick={() => setViewMode('lead')} className={viewMode==='lead'?'text-primary':''}>KL</Button>
@@ -107,7 +107,7 @@ function SaveGroup() {
         title="Rückgängig (⌘Z / Ctrl+Z)"
         disabled={disabled}
         onClick={() => undo?.()}
-        className="inline-flex items-center justify-center rounded text-fg disabled:opacity-50 hover:bg-neutral-800/40 px-3 py-1"
+        className="inline-flex items-center justify-center rounded text-fg disabled:opacity-50 bg-neutral-950 hover:bg-neutral-950 px-3 py-1"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M3 7v6h6" />
