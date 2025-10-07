@@ -667,7 +667,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
               </div>
             )}
 
-            {section === 'danger' && !createMode && profile?.id && (
+            {section === 'admin' && !createMode && profile?.id && (
               <div className="grid gap-3">
                 <div className="text-sm text-fg-muted">Unumkehrbare Aktionen</div>
                 <div className="rounded border border-neutral-900 p-3">

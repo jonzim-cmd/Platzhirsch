@@ -18,6 +18,7 @@ export type Plan = {
   id: string
   classId: string
   roomId: string
+  // Optional name; null indicates the default (lead) plan
+  title: string | null
   elements: Element[]
 }
-
