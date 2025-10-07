@@ -875,9 +875,11 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
       const r1 = await fetch(`/api/plan?${qsById}`)
       if (r1.ok) {
         const d1 = await r1.json()
-        if (d1?.plan && d1.plan.classId === classId && d1.plan.roomId === roomId && d1.plan.ownerProfileId ? true : true) {
-          data = d1
-        }
+        const okContext = d1?.plan
+          && d1.plan.classId === classId
+          && d1.plan.roomId === roomId
+          && (!activeProfile?.id || d1.plan.ownerProfileId === activeProfile.id)
+        if (okContext) data = d1
       }
     }
     // Fallback to context-based default/creation
