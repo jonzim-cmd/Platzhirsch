@@ -58,8 +58,8 @@ function SaveGroup() {
       {leadPlan && (
         <div className="flex items-center gap-2 bg-neutral-950 px-1 py-0.5">
           <span className="text-fg-muted">Ansicht:</span>
-          <Button size="xs" variant="subtle" onClick={() => setViewMode('owner')} className={viewMode==='owner'?'text-primary':''}>Eigen</Button>
-          <Button size="xs" variant="subtle" onClick={() => setViewMode('lead')} className={viewMode==='lead'?'text-primary':''}>KL</Button>
+          <Button size="xs" variant="subtle" title="Eigenen Plan anzeigen" onClick={() => setViewMode('owner')} className={viewMode==='owner'?'text-primary':''}>Eigen</Button>
+          <Button size="xs" variant="subtle" title="Plan der Klassenleitung anzeigen" onClick={() => setViewMode('lead')} className={viewMode==='lead'?'text-primary':''}>KL</Button>
         </div>
       )}
       {canShare && (
@@ -68,6 +68,7 @@ function SaveGroup() {
             <Button
               size="xs"
               variant="subtle"
+              title="Plan freigeben (als Klassenleitung teilen)"
               disabled={shareBusy}
               onClick={async () => {
                 setShareBusy(true)
@@ -85,6 +86,7 @@ function SaveGroup() {
             <Button
               size="xs"
               variant="subtle"
+              title="Freigabe aufheben"
               disabled={shareBusy}
               onClick={async () => {
                 setShareBusy(true)
@@ -108,7 +110,7 @@ function SaveGroup() {
         title="Rückgängig (⌘Z / Ctrl+Z)"
         disabled={disabled}
         onClick={() => undo?.()}
-        className="inline-flex items-center justify-center rounded text-fg disabled:opacity-50 bg-bg hover:bg-bg px-3 py-1 focus:outline-none focus:ring-0"
+        className="inline-flex items-center justify-center rounded text-fg disabled:opacity-50 bg-neutral-950 hover:bg-neutral-950 px-3 py-1 focus:outline-none focus:ring-0"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M3 7v6h6" />

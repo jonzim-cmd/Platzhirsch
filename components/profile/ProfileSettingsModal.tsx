@@ -215,11 +215,21 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
       }
       if (!pid) throw new Error('Kein Profil ausgewählt')
       // Ensure new classes exist for any suggestion-added names
+      let classExistsWarned = false
       const ensureClass = async (name: string): Promise<{ id: string; name: string }> => {
         // if present in rows with id, return
         const existing = rows.find(r => r.name === name && r.id)
         if (existing) return { id: existing.id, name: existing.name }
-        const created = await fetch('/api/classes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then(r=>r.json())
+        const res = await fetch('/api/classes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+        if (res.status === 409) {
+          const data = await res.json().catch(()=>null as any)
+          const cls = data?.class
+          if (cls?.id && cls?.name) {
+            if (!classExistsWarned) { alert(`Klasse "${cls.name}" existiert bereits.`); classExistsWarned = true }
+            return { id: cls.id, name: cls.name }
+          }
+        }
+        const created = await res.json()
         return created
       }
 
@@ -326,8 +336,18 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
   async function createRoom() {
     const n = prompt('Neuen Raum anlegen (Name):', '')?.trim()
     if (!n) return
-    const r = await fetch('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: n }) }).then(r=>r.json())
-    setRooms(prev => [...prev, r])
+    try {
+      const res = await fetch('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: n }) })
+      if (res.status === 409) {
+        const data = await res.json().catch(()=>null as any)
+        const room = data?.room
+        alert(`Raum "${room?.name || n}" existiert bereits.`)
+        try { const all = await fetch('/api/rooms').then(r=>r.json()); setRooms(all) } catch {}
+        return
+      }
+      const r = await res.json()
+      setRooms(prev => [...prev, r])
+    } catch {}
   }
 
   async function deleteRoomById(id: string) {

@@ -22,6 +22,9 @@ export async function POST(req: NextRequest) {
   const name = (body?.name as string | undefined)?.trim()
   const leadProfileId = (body?.leadProfileId as string | undefined) || undefined
   if (!name) return NextResponse.json({ error: 'invalid name' }, { status: 400 })
+  // Conflict-friendly behavior: if class with name exists, return 409 + existing
+  const existing = await prisma.class.findUnique({ where: { name } })
+  if (existing) return NextResponse.json({ error: 'exists', class: existing }, { status: 409 })
   try {
     const c = await prisma.class.create({ data: { name, leadProfileId: leadProfileId ?? null } })
     return NextResponse.json(c)

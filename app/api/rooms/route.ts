@@ -12,6 +12,9 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null as any)
   const name = ((body?.name as string) || '').trim()
   if (!name) return NextResponse.json({ error: 'invalid name' }, { status: 400 })
+  // Conflict-friendly: if room exists, return 409 + existing
+  const existing = await prisma.room.findUnique({ where: { name } })
+  if (existing) return NextResponse.json({ error: 'exists', room: existing }, { status: 409 })
   try {
     const r = await prisma.room.create({ data: { name } })
     return NextResponse.json(r)
