@@ -712,29 +712,41 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
               </div>
             )}
 
-            {section === 'admin' && !createMode && profile?.id && (
+            {section === 'admin' && !createMode && (
               <div className="grid gap-3">
                 <div className="text-sm text-fg-muted">Unumkehrbare Aktionen</div>
                 <div className="rounded border border-neutral-900 p-3">
-                  <div className="mb-2">Zum Bestätigen Profilnamen eingeben und löschen:</div>
-                  <FormRow label="Profilname bestätigen">
-                    <InlineInput className="w-56" value={name} onChange={(e)=>setName(e.target.value)} />
+                  <div className="mb-2">Profil auswählen, dann mit Namensbestätigung löschen:</div>
+                  <FormRow label="Profil wählen">
+                    <select
+                      className="w-56 h-9 rounded bg-neutral-900 px-2 text-sm border border-neutral-800"
+                      value={selectedProfileId || ''}
+                      onChange={(e)=>setSelectedProfileId(e.target.value)}
+                    >
+                      <option value="">Wählen…</option>
+                      {allProfiles.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
                     <Button className="h-9"
                       variant="danger"
+                      disabled={!selectedProfileId}
                       onClick={async () => {
-                        if (!profile?.id) return
-                        const confirmName = prompt('Zum Löschen Profilnamen eingeben:')
-                        if (!confirmName || confirmName !== (profile?.name || '')) return
-                        await fetch(`/api/profiles/${profile.id}`, { method: 'DELETE' })
+                        const pid = selectedProfileId || ''
+                        if (!pid) return
+                        const current = allProfiles.find(p => p.id === pid)
+                        const confirmName = prompt('Zum Löschen bitte Profilnamen eingeben:')
+                        if (!confirmName || confirmName !== (current?.name || '')) return
+                        await fetch(`/api/profiles/${pid}`, { method: 'DELETE' })
                         try {
                           const raw = localStorage.getItem('activeProfile')
                           const act = raw ? JSON.parse(raw) : null
-                          if (act?.id === profile.id) {
+                          if (act?.id === pid) {
                             localStorage.removeItem('activeProfile')
-                            window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: JSON.stringify({ t: Date.now() }) }))
-                          } else {
-                            window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: JSON.stringify({ t: Date.now() }) }))
                           }
+                          const stamp = Date.now()
+                          localStorage.setItem('dataChanged', JSON.stringify({ t: stamp }))
+                          window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: JSON.stringify({ t: stamp }) }))
                         } catch {}
                         onClose(true)
                       }}
