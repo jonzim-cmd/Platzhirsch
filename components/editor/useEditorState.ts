@@ -17,11 +17,19 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
   const [elements, setElements] = useState<Element[]>([])
   const elementsRef = useRef<Element[]>([])
   const [students, setStudents] = useState<{ id: string; foreName: string }[]>([])
+  // simple in-memory cache for students per class to avoid repeated network trips on switches
+  const studentsCacheRef = useRef<Map<string, { data: { id: string; foreName: string }[]; ts: number }>>(new Map())
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const elementRefs = useRef<Map<string, HTMLElement>>(new Map())
   const saveTimer = useRef<NodeJS.Timeout | null>(null)
+  // Abort controllers for in‑flight loads (avoid races on quick switches)
+  const studentsFetchCtl = useRef<AbortController | null>(null)
+  const planFetchCtl = useRef<AbortController | null>(null)
+  const lastLoadKeyRef = useRef<string>('')
+  const planCacheRef = useRef<Map<string, { plan: Plan; leadPlan: Plan | null; elements: Element[]; ts: number }>>(new Map())
+  const [loadingPlan, setLoadingPlan] = useState(false)
   const [clipboard, setClipboard] = useState<Element[] | null>(null)
   // History (undo/redo) for element state
   const historyRef = useRef<{ past: Element[][]; future: Element[][] }>({ past: [], future: [] })
@@ -913,41 +921,84 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
   // Load students when class changes
   useEffect(() => {
     if (!classId) { setStudents([]); return }
-    fetch(`/api/students?classId=${classId}`).then(r => r.json()).then((data) => {
-      if (Array.isArray(data)) setStudents(data)
-    }).catch(() => setStudents([]))
+    try { studentsFetchCtl.current?.abort() } catch {}
+    const ctl = new AbortController(); studentsFetchCtl.current = ctl
+    // serve from cache immediately if present
+    const cached = studentsCacheRef.current.get(classId)
+    if (cached) setStudents(cached.data)
+    fetch(`/api/students?classId=${classId}`, { signal: ctl.signal }).then(r => r.ok ? r.json() : []).then((data) => {
+      if (!ctl.signal.aborted && Array.isArray(data)) {
+        studentsCacheRef.current.set(classId, { data, ts: Date.now() })
+        setStudents(data)
+      }
+    }).catch(() => { if (!ctl.signal.aborted) setStudents(cached?.data ?? []) })
   }, [classId])
 
   const loadPlan = useCallback(async (create: boolean) => {
     if (!activeProfile?.id || !classId || !roomId) return
+    // Deduplicate identical consecutive loads
+    const loadKey = `${activeProfile.id}|${classId}|${roomId}|${planId || ''}|${create ? '1' : '0'}`
+    if (lastLoadKeyRef.current === loadKey) return
+    lastLoadKeyRef.current = loadKey
+    // cancel previous in‑flight plan request
+    try { planFetchCtl.current?.abort() } catch {}
+    const ctl = new AbortController(); planFetchCtl.current = ctl
+    setLoadingPlan(true)
+    // optimistic render from cache for current context
+    const ctxKey = `${activeProfile.id}:${classId}:${roomId}`
+    const cached = planCacheRef.current.get(ctxKey)
+    if (cached) {
+      try { setPlan(cached.plan) } catch {}
+      try { setLeadPlan(cached.leadPlan) } catch {}
+      try { setElements(cached.elements) } catch {}
+      setSelectedIds([])
+    }
     const qsById = `planId=${encodeURIComponent(planId || '')}&classId=${encodeURIComponent(classId)}&roomId=${encodeURIComponent(roomId)}&includeLead=1`
     const qsByContext = `ownerProfileId=${encodeURIComponent(activeProfile.id)}&classId=${encodeURIComponent(classId)}&roomId=${encodeURIComponent(roomId)}&create=${create ? '1' : '0'}&includeLead=1`
     // Prefer explicit planId if present, but verify it matches current context
     let data: any = null
-    if (planId) {
-      const r1 = await fetch(`/api/plan?${qsById}`)
-      if (r1.ok) {
-        const d1 = await r1.json()
-        const okContext = d1?.plan
+    try {
+      if (planId) {
+        const byIdP = fetch(`/api/plan?${qsById}`, { signal: ctl.signal })
+        const byCtxP = fetch(`/api/plan?${qsByContext}`, { signal: ctl.signal })
+        const [r1, r2] = await Promise.allSettled([byIdP, byCtxP])
+        const ok1 = (r1.status === 'fulfilled') && r1.value.ok
+        const ok2 = (r2.status === 'fulfilled') && r2.value.ok
+        let d1: any = null, d2: any = null
+        if (ok1) d1 = await (r1 as PromiseFulfilledResult<Response>).value.json()
+        if (ok2) d2 = await (r2 as PromiseFulfilledResult<Response>).value.json()
+        const idMatches = d1?.plan
           && d1.plan.classId === classId
           && d1.plan.roomId === roomId
           && (!activeProfile?.id || d1.plan.ownerProfileId === activeProfile.id)
-        if (okContext) data = d1
+        // Prefer planId result if it matches; otherwise use context result
+        data = idMatches ? d1 : d2
+        if (!data) return
+      } else {
+        const r2 = await fetch(`/api/plan?${qsByContext}`, { signal: ctl.signal })
+        if (!r2.ok) return
+        data = await r2.json()
       }
+    } catch (e: any) {
+      // Swallow aborts; anything else just bail silently to keep UX unchanged
+      const msg = String(e?.message || '').toLowerCase()
+      if (e?.name !== 'AbortError' && !msg.includes('aborted')) {
+        setLoadingPlan(false); return
+      }
+      setLoadingPlan(false); return
     }
-    // Fallback to context-based default/creation
-    if (!data) {
-      const r2 = await fetch(`/api/plan?${qsByContext}`)
-      if (!r2.ok) return
-      data = await r2.json()
+    if (ctl.signal.aborted) { setLoadingPlan(false); return }
+    if (!planRef.current || planRef.current.id !== data.plan.id || String((planRef.current as any).updatedAt || '') !== String((data.plan as any).updatedAt || '')) {
+      setPlan(data.plan)
     }
-    setPlan(data.plan)
     // Synchronize planId if it changed or was missing
     if (!planId || planId !== data.plan.id) {
       try {
         const url = new URL(window.location.href)
-        url.searchParams.set('pl', data.plan.id)
-        window.history.replaceState({}, '', url.toString())
+        if (url.searchParams.get('pl') !== data.plan.id) {
+          url.searchParams.set('pl', data.plan.id)
+          window.history.replaceState({}, '', url.toString())
+        }
         window.dispatchEvent(new StorageEvent('storage', { key: 'selection', newValue: JSON.stringify({ p: activeProfile.id, c: classId, r: roomId, pl: data.plan.id }) }))
       } catch {}
       setPlanId(data.plan.id)
@@ -1057,19 +1108,37 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
         meta: { ...(el.meta || {}), joints: joints.get(el.id!) }
       }))
     }
-    const converted = convertGroupsToJoints(rawEls)
-    setElements(converted)
+    // Fast path: if there are no legacy groupIds and joints already present, skip conversion
+    const needsConversion = rawEls.some((e: any) => Boolean(e.groupId))
+    const converted = needsConversion ? convertGroupsToJoints(rawEls) : rawEls
+    // Only persist if conversion actually changed data (avoids eager POST on every load)
+    const changed = (() => {
+      if (rawEls.length !== converted.length) return true
+      for (let i = 0; i < rawEls.length; i++) {
+        const a: any = rawEls[i]
+        const b: any = converted[i]
+        const aj = JSON.stringify((a.meta as any)?.joints ?? null)
+        const bj = JSON.stringify((b.meta as any)?.joints ?? null)
+        if ((a.groupId ?? null) !== (b.groupId ?? null)) return true
+        if (aj !== bj) return true
+      }
+      return false
+    })()
+    const finalEls = changed ? converted : rawEls
+    setElements(finalEls)
     setSelectedIds([])
-    // persist conversion
-    setTimeout(() => scheduleSave(), 0)
+    if (changed) setTimeout(() => scheduleSave(), 0)
+    // update cache for this context
+    try { planCacheRef.current.set(ctxKey, { plan: data.plan, leadPlan: data.leadPlan ?? null, elements: finalEls, ts: Date.now() }) } catch {}
+    setLoadingPlan(false)
   }, [activeProfile?.id, classId, roomId, planId])
 
-  // Auto-load or create plan when filters are selected (after loadPlan is defined)
+  // Auto-load or create plan when filters are selected (no need to react to planId changes)
   useEffect(() => {
     if (activeProfile?.id && classId && roomId) {
       loadPlan(true)
     }
-  }, [activeProfile?.id, classId, roomId, planId, loadPlan])
+  }, [activeProfile?.id, classId, roomId, loadPlan])
 
   const scheduleSave = useCallback(() => {
     if (!planRef.current) {
@@ -2079,6 +2148,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
 
   return {
     plan, leadPlan, viewMode, setViewMode, saving,
+    loadingPlan,
     frameRef, canvasRef, frameSize,
     readOnly, elements, selectedIds, setSelectedIds,
     elementRefs, selected, studentById, defaultTerms,

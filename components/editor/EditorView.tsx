@@ -12,6 +12,17 @@ export function EditorView() {
       <div className="lg:col-span-5 h-[calc(100vh-48px)] rounded border border-neutral-900 bg-neutral-950/40 relative">
         <EditorHeader />
         <EditorCanvas />
+        {ctx.loadingPlan && (
+          <div className="absolute inset-0 flex items-center justify-center bg-neutral-950" style={{ zIndex: Z.overlay }}>
+            <div className="flex items-center gap-2 text-fg-muted">
+              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" className="opacity-20" />
+                <path d="M21 12a9 9 0 0 0-9-9" />
+              </svg>
+              <span>Laden…</span>
+            </div>
+          </div>
+        )}
       </div>
       {ctx.sidebarOpen && (
         <div

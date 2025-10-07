@@ -13,7 +13,7 @@ export function EditorHeader() {
 }
 
 function SaveGroup() {
-  const { undo, canUndo, readOnly, saving, plan, classId, activeProfile, leadPlan, viewMode, setViewMode } = useEditor()
+  const { undo, canUndo, readOnly, saving, loadingPlan, plan, classId, activeProfile, leadPlan, viewMode, setViewMode } = useEditor()
   const [isLead, setIsLead] = useState(false)
   const [shared, setShared] = useState(false)
   const [shareBusy, setShareBusy] = useState(false)
@@ -50,9 +50,10 @@ function SaveGroup() {
   }, [canShare, plan?.id])
   return (
     <div className="mr-2 flex items-center gap-2">
-      <div className="leading-none text-fg-muted select-none">
-        {saving === 'saving' && <span>Speichern…</span>}
-        {saving === 'saved' && <span className="text-primary">Gespeichert</span>}
+      <div className="leading-none text-fg-muted select-none min-w-[80px] text-right">
+        {loadingPlan && <span>Laden…</span>}
+        {!loadingPlan && saving === 'saving' && <span>Speichern…</span>}
+        {!loadingPlan && saving === 'saved' && <span className="text-primary">Gespeichert</span>}
       </div>
       {leadPlan && (
         <div className="flex items-center gap-2 bg-neutral-950 px-1 py-0.5">
