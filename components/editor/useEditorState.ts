@@ -31,6 +31,56 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
   const deepClone = (els: Element[]): Element[] => {
     try { return (structuredClone as any)(els) } catch { return JSON.parse(JSON.stringify(els)) }
   }
+  
+  // Add exactly one empty student seat (Tisch). Shown as "leer" via fallback label.
+  const addEmptyStudent = () => {
+    if (readOnly) return
+    try { autoCenterDoneRef.current = true } catch {}
+    const seatW = 120
+    const seatH = 70
+    const marginX = 40
+    const marginY = 60
+    const betweenX = 24
+    const betweenY = 24
+    const availW = Math.max(0, frameSize.w - marginX * 2)
+    const perRow = Math.max(1, Math.floor((availW + betweenX) / (seatW + betweenX)))
+
+    type Box = { left: number; top: number; right: number; bottom: number }
+    const obstacles: Box[] = []
+    for (const el of elements) {
+      const left = el.x
+      const top = el.y
+      const right = el.x + el.w
+      const bottom = el.y + el.h
+      obstacles.push({ left, top, right, bottom })
+    }
+    const rectsIntersect = (a: Box, b: Box) => !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom)
+    const isFreeSingle = (x: number, y: number) => {
+      const r: Box = { left: x, top: y, right: x + seatW, bottom: y + seatH }
+      for (const ob of obstacles) { if (rectsIntersect(r, ob)) return false }
+      if (x < 0 || y < 0) return false
+      if (x + seatW > frameSize.w) return false
+      if (y + seatH > frameSize.h) return false
+      return true
+    }
+
+    let placedX = marginX
+    let placedY = marginY
+    let found = false
+    for (let r = 0; r < 200 && !found; r++) {
+      const y = marginY + r * (seatH + betweenY)
+      for (let c = 0; c < perRow; c++) {
+        const x = marginX + c * (seatW + betweenX)
+        if (isFreeSingle(x, y)) { placedX = x; placedY = y; found = true; break }
+      }
+    }
+    if (!found) { placedX = marginX; placedY = marginY }
+
+    const baseFont = typeStyles['STUDENT']?.fontSize ?? 20
+    const seat: Element = { id: uid('el'), type: 'STUDENT', refId: null, x: placedX, y: placedY, w: seatW, h: seatH, rotation: 0, z: elements.length, groupId: null, meta: { fontSize: baseFont } }
+    setElements(prev => [...prev, seat])
+    scheduleSave()
+  }
   const updateHistoryFlags = () => {
     setCanUndo(historyRef.current.past.length > 0)
     setCanRedo(historyRef.current.future.length > 0)
@@ -1087,6 +1137,8 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
       }
       return prev.map(e => visited.has(e.id!) ? { ...e, x: e.x + dx, y: e.y + dy } : e)
     })
+    // Save while moving (debounced)
+    scheduleSave()
   }
 
   const onDragEnd = (id: string, opts?: { detach?: boolean }) => {
@@ -1393,7 +1445,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
         next = next.map(e => otherIds.has(e.id!) ? { ...e, meta: { ...(e.meta || {}), joints: (Array.isArray(e.meta?.joints) ? (e.meta!.joints as any[]).filter((l: any) => l.otherId !== id) : []) } } : e)
         return next
       }
-      // try to snap to nearest joints or create a joint on overlap
+      // try to snap to nearest joints (no automatic heften)
       const list = prev.map(x => ({ ...x }))
       const el = list.find(x => x.id === id)!
       const byId = new Map(list.map(x => [x.id!, x]))
@@ -1406,28 +1458,10 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
         el.y += res.dy
         snapped = true
       }
-      if (!snapped) {
-        // if intersects with one other, create a joint at edge midpoint
-        let best: { other: Element; overlap: number } | null = null
-        for (const other of list) {
-          if (other.id === el.id) continue
-          if (!intersects(el, other)) continue
-          const left = Math.max(el.x, other.x)
-          const right = Math.min(el.x + el.w, other.x + other.w)
-          const top = Math.max(el.y, other.y)
-          const bottom = Math.min(el.y + el.h, other.y + other.h)
-          const ov = Math.max(0, right - left) * Math.max(0, bottom - top)
-          if (!best || ov > best.overlap) best = { other, overlap: ov }
-        }
-        if (best) {
-          const joint = computeEdgeJointRect({ x: el.x, y: el.y, w: el.w, h: el.h }, { x: best.other.x, y: best.other.y, w: best.other.w, h: best.other.h })
-          if (joint) {
-            addJoint(id, best.other.id!, joint.aSide, joint.bSide, joint.aT, joint.bT)
-          }
-        }
-      }
       return list
     })
+    // Always persist end state
+    scheduleSave()
   }
 
   const [frameSize, setFrameSize] = useState({ w: 1200, h: 700 })
@@ -2038,7 +2072,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
     readOnly, elements, selectedIds, setSelectedIds,
     elementRefs, selected, studentById, defaultTerms,
     pickerOpenId, setPickerOpenId, pickerQuery, setPickerQuery,
-    usedStudentIds, addElement, applyPairsLayout, removeJoint, scheduleSave,
+    usedStudentIds, addElement, addEmptyStudent, applyPairsLayout, removeJoint, scheduleSave,
     exportPng, exportPdf, selectedTarget, primarySelectedId,
     moveElementBy, onDragEnd, setElements, students, classId, roomId, loadPlan,
     setMarquee, marquee, editing, setEditing, detachOnDragRef, dragStartPositions,

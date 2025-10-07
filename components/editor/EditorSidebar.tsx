@@ -39,6 +39,7 @@ export function EditorSidebar() {
       <div className="rounded border border-neutral-900 p-3 mb-3">
         <div className="text-xs uppercase tracking-wide text-fg-muted mb-2">Elemente</div>
         <div className="flex flex-wrap gap-2">
+          <Button onClick={() => { ctx.historyCommit?.(); ctx.addEmptyStudent() }}>Tisch</Button>
           <Button onClick={() => { ctx.historyCommit?.(); addElement('TEACHER_DESK') }}>Lehrer</Button>
           <Button onClick={() => { ctx.historyCommit?.(); addElement('DOOR') }}>Tür</Button>
           <Button onClick={() => { ctx.historyCommit?.(); addElement('WINDOW_SIDE') }}>Fenster</Button>
