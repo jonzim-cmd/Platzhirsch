@@ -39,14 +39,19 @@ export function TopBar() {
       const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
       if (!raw) return rooms
       const mapping = JSON.parse(raw) as Record<string, string[]>
+      // Wenn Klassen geladen sind, berücksichtige nur deren IDs
+      const allowedClassIds = new Set((classes || []).map(c => c.id))
       const byName = new Set<string>()
-      Object.values(mapping).forEach(list => (list || []).forEach(n => byName.add(n)))
+      for (const [clsId, list] of Object.entries(mapping)) {
+        if (allowedClassIds.size > 0 && !allowedClassIds.has(clsId)) continue
+        ;(list || []).forEach(n => byName.add(n))
+      }
       if (byName.size === 0) return rooms
       return rooms.filter(r => byName.has(r.name))
     } catch {
       return rooms
     }
-  }, [rooms, activeProfile?.id])
+  }, [rooms, activeProfile?.id, classes])
 
   useEffect(() => {
     fetch('/api/profiles').then(r=>r.json()).then(setProfiles).catch(()=>{})

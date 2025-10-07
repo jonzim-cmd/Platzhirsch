@@ -272,7 +272,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
       try {
         const mapping: Record<string, string[]> = {}
         for (const r of rows) {
-          if (!r.id) continue
+          if (!r.id || !r.assigned) continue
           const key = r.id
           const sel = classRooms[r.id] || classRooms[`name:${r.name}`] || new Set<string>()
           mapping[key] = Array.from(sel)
