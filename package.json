@@ -13,6 +13,7 @@
     "prisma:deploy": "prisma migrate deploy"
   },
   "dependencies": {
+    "@fluentui/react-icons": "^2.0.311",
     "@prisma/client": "5.19.1",
     "class-variance-authority": "0.7.0",
     "clsx": "2.1.1",

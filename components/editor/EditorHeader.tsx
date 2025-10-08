@@ -1,5 +1,6 @@
 "use client"
 import { Button } from '@/components/ui/Button'
+import { ArrowUndo16Regular, ArrowRedo16Regular } from '@fluentui/react-icons'
 import { Z } from '@/components/ui/zIndex'
 import { useEditor } from '@/components/editor/EditorContext'
 import { useEffect, useMemo, useState } from 'react'
@@ -13,13 +14,14 @@ export function EditorHeader() {
 }
 
 function SaveGroup() {
-  const { undo, canUndo, readOnly, saving, loadingPlan, plan, classId, activeProfile, leadPlan, viewMode, setViewMode } = useEditor()
+  const { undo, redo, canUndo, canRedo, readOnly, saving, loadingPlan, plan, classId, activeProfile, leadPlan, viewMode, setViewMode } = useEditor()
   const [isLead, setIsLead] = useState(false)
   const [shared, setShared] = useState(false)
   const [shareBusy, setShareBusy] = useState(false)
   const [toast, setToast] = useState<'shared'|'unshared'|null>(null)
   const canShare = useMemo(() => Boolean(isLead && plan && plan.title === null), [isLead, plan?.id, plan?.title])
-  const disabled = readOnly || !canUndo
+  const disabledUndo = readOnly || !canUndo
+  const disabledRedo = readOnly || !canRedo
   useEffect(() => {
     let alive = true
     async function checkLead() {
@@ -104,19 +106,26 @@ function SaveGroup() {
           {toast === 'unshared' && <span className="text-fg-muted">Freigabe aufgehoben</span>}
         </div>
       )}
-      <div className="rounded bg-neutral-950">
+      <div className="flex items-center gap-1 bg-neutral-950">
         <button
           type="button"
           aria-label="Rückgängig"
           title="Rückgängig (⌘Z / Ctrl+Z)"
-          disabled={disabled}
+          disabled={disabledUndo}
           onClick={() => undo?.()}
-          className="inline-flex items-center justify-center rounded text-fg disabled:opacity-50 px-3 py-1 focus:outline-none focus:ring-0"
+          className="inline-flex items-center justify-center text-fg disabled:opacity-50 px-1.5 py-0.5 focus:outline-none focus:ring-0"
         >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M3 7v6h6" />
-          <path d="M3.51 15.49A9 9 0 1 0 5.64 5.64L3 8.29" />
-        </svg>
+          <ArrowUndo16Regular aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          aria-label="Wiederholen"
+          title="Vorwärts/Wiederholen (⇧⌘Z / Ctrl+Y)"
+          disabled={disabledRedo}
+          onClick={() => redo?.()}
+          className="inline-flex items-center justify-center text-fg disabled:opacity-50 px-1.5 py-0.5 focus:outline-none focus:ring-0"
+        >
+          <ArrowRedo16Regular aria-hidden="true" />
         </button>
       </div>
     </div>
