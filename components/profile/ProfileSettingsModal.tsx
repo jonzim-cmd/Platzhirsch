@@ -227,7 +227,6 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
       }
       if (!pid) throw new Error('Kein Profil ausgewählt')
       // Ensure new classes exist for any suggestion-added names
-      let classExistsWarned = false
       const ensureClass = async (name: string): Promise<{ id: string; name: string }> => {
         // if present in rows with id, return
         const existing = rows.find(r => r.name === name && r.id)
@@ -236,10 +235,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
         if (res.status === 409) {
           const data = await res.json().catch(()=>null as any)
           const cls = data?.class
-          if (cls?.id && cls?.name) {
-            if (!classExistsWarned) { alert(`Klasse "${cls.name}" existiert bereits.`); classExistsWarned = true }
-            return { id: cls.id, name: cls.name }
-          }
+          if (cls?.id && cls?.name) return { id: cls.id, name: cls.name }
         }
         const created = await res.json()
         return created
@@ -285,16 +281,13 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
       // Rooms: ensure existence (best effort, parallel)
       const allSelectedRooms = new Set<string>()
       for (const key of Object.keys(classRooms)) for (const r of classRooms[key]) allSelectedRooms.add(r)
-      const roomWarned = new Set<string>()
       const roomTasks: Promise<any>[] = []
       for (const roomName of allSelectedRooms) {
         roomTasks.push((async () => {
           try {
             const res = await fetch('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: roomName }) })
-            if (res.status === 409 && !roomWarned.has(roomName)) {
-              roomWarned.add(roomName)
-              alert(`Raum "${roomName}" existiert bereits.`)
-            }
+            // Ignore 409 on save: existence is expected here
+            if (res.status === 409) { /* noop */ }
           } catch { /* ignore */ }
         })())
       }
