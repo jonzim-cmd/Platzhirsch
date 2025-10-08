@@ -54,25 +54,16 @@ export function TopBar() {
   }, [rooms, activeProfile?.id, classes])
 
   useEffect(() => {
+    // Initial load: fetch lists, but do not restore any previous selection.
+    // All dropdowns should start at "Bitte auswählen…" after reload.
     fetch('/api/profiles').then(r=>r.json()).then(setProfiles).catch(()=>{})
     fetch('/api/rooms').then(r=>r.json()).then(setRooms).catch(()=>{})
-    // restore from URL/localStorage
-    try {
-      const url = new URL(window.location.href)
-      const p = url.searchParams.get('p')
-      const c = url.searchParams.get('c')
-      const r = url.searchParams.get('r')
-      const pl = url.searchParams.get('pl')
-      const lp = localStorage.getItem('activeProfile')
-      if (p && profiles.length) {
-        const prof = profiles.find(x=>x.id===p) || null
-        setActiveProfile(prof)
-        if (prof) localStorage.setItem('activeProfile', JSON.stringify(prof))
-      } else if (lp) setActiveProfile(JSON.parse(lp))
-      if (c) setClassId(c)
-      if (r) setRoomId(r)
-      if (pl) setPlanId(pl)
-    } catch {}
+    setActiveProfile(null)
+    setClassId('')
+    setRoomId('')
+    setPlanId('')
+    // Clear URL params to reflect cleared state
+    try { updateUrl(undefined, undefined, undefined, undefined) } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -176,9 +167,12 @@ export function TopBar() {
     })
     // sync URL/localStorage
     localStorage.setItem('activeProfile', JSON.stringify(activeProfile))
+    // On profile change: reset class and room dropdowns to "Bitte auswählen…"
+    if (classId) setClassId('')
+    if (roomId) setRoomId('')
     // reset selected plan when switching profiles to avoid cross-profile planId bleed
     setPlanId('')
-    updateUrl(activeProfile.id, classId || undefined, roomId || undefined, undefined)
+    updateUrl(activeProfile.id, undefined, undefined, undefined)
   }, [activeProfile?.id])
 
   // Clear room selection when it becomes invalid for the filtered list
@@ -195,6 +189,11 @@ export function TopBar() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classId, roomId])
+
+  // When class changes, reset the room dropdown to "Bitte auswählen…"
+  useEffect(() => {
+    if (roomId) setRoomId('')
+  }, [classId])
 
   useEffect(() => {
     updateUrl(activeProfile?.id, classId || undefined, roomId || undefined, planId || undefined)
@@ -248,7 +247,7 @@ export function TopBar() {
     window.dispatchEvent(new StorageEvent('storage', { key: 'selection', newValue: JSON.stringify({ p, c, r, pl }) }))
   }
 
-  const profileLabel = useMemo(() => 'Profil wählen…', [])
+  const profileLabel = useMemo(() => 'Bitte auswählen…', [])
 
   async function createProfileInline() {
     const trimmed = profileDraftName.trim()
@@ -364,7 +363,7 @@ export function TopBar() {
               disabled={!activeProfile}
               className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800 disabled:opacity-50"
             >
-              <option value="">Klasse wählen…</option>
+              <option value="">Bitte auswählen…</option>
               {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
 
@@ -374,7 +373,7 @@ export function TopBar() {
               onChange={(e)=>setRoomId(e.target.value)}
               className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800"
             >
-              <option value="">Raum wählen…</option>
+              <option value="">Bitte auswählen…</option>
               {visibleRooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
 
@@ -403,7 +402,7 @@ export function TopBar() {
               disabled={!activeProfile || !classId || !roomId}
               className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800 disabled:opacity-50"
             >
-              <option value="">Plan wählen…</option>
+              <option value="">Bitte auswählen…</option>
               {plans.map(pl => (
                 <option key={pl.id} value={pl.id}>{pl.isDefault ? 'Standard' : (pl.title || 'Plan')}</option>
               ))}
