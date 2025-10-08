@@ -86,6 +86,24 @@ export function TopBar() {
           if (v?.c) setClassId(v.c)
           if (v?.r) setRoomId(v.r)
           if (v?.pl) setPlanId(v.pl)
+          // If context (p,c,r) is provided, refresh plans for that context so the dropdown shows the new default immediately
+          const ownerId = (v?.p || activeProfile?.id)
+          const clsId = (v?.c || classId)
+          const rmId = (v?.r || roomId)
+          if (ownerId && clsId && rmId) {
+            ;(async () => {
+              try {
+                const data = await fetch(`/api/plans?ownerProfileId=${ownerId}&classId=${clsId}&roomId=${rmId}`).then(r=>r.json())
+                const raw: PlanRow[] = (data?.plans || [])
+                let seenDefault = false
+                const arr = raw.filter((p) => {
+                  if (p.isDefault) { if (seenDefault) return false; seenDefault = true }
+                  return true
+                })
+                setPlans(arr)
+              } catch { /* ignore */ }
+            })()
+          }
         } catch {}
       } else if (e.key === 'dataChanged') {
         // refresh lists (profiles, rooms, and classes for active profile)
