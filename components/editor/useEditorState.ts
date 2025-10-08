@@ -533,15 +533,97 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
       }
     }
 
-    // assign all students sequentially (use all)
-    // Assign refIds: first loaded students, then preserve any existing refIds if present
-    const assignedSeats = newSeats.map((e, i) => {
-      if (i < nStudents) return { ...e, refId: students[i].id }
-      if (i < existingSeats.length) return { ...e, refId: existingSeats[i].refId ?? null }
-      return e
-    })
+    const assignWithPairs = (seats: Element[]) => {
+      const prevSeats = existingSeats.filter(e => e.refId)
+      const refOrder = (nStudents > 0 ? students.map(s => s.id) : prevSeats.map(s => String(s.refId))).filter(Boolean)
+      const byId = new Map<string, Element>(elements.map(e => [e.id!, e]))
+      const manualPairs: Array<[string, string, string | undefined]> = []
+      const manualStudentLinks: Array<{ ra: string; rb: string; kind: 'pair' | 'struct'; pairId?: string }> = []
+      const seen = new Set<string>()
+      for (const a of prevSeats) {
+        const links: any[] = Array.isArray(a.meta?.joints) ? a.meta!.joints : []
+        for (const j of links) {
+          const b = byId.get(String(j.otherId))
+          if (!b || b.type !== 'STUDENT') continue
+          const ra = String(a.refId || '')
+          const rb = String(b.refId || '')
+          if (!ra || !rb) continue
+          const key = ra < rb ? `${ra}|${rb}` : `${rb}|${ra}`
+          if (!seen.has(key) && j.kind === 'pair') manualPairs.push([ra, rb, j.pairId ?? undefined])
+          manualStudentLinks.push({ ra, rb, kind: (j.kind === 'pair' ? 'pair' : 'struct'), pairId: j.pairId ?? undefined })
+        }
+      }
+      const used = new Set<string>(manualPairs.flatMap(p => [p[0], p[1]]))
+      const rowSorted = prevSeats.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x))
+      const autoPairs: Array<[string, string]> = []
+      for (let i = 0; i < rowSorted.length; i++) {
+        const a = rowSorted[i]
+        const ra = String(a.refId || '')
+        if (!ra || used.has(ra)) continue
+        // try next by order in same visual row
+        let j = i + 1
+        while (j < rowSorted.length) {
+          const b = rowSorted[j]
+          const rb = String(b.refId || '')
+          if (!rb || used.has(rb)) { j++; continue }
+          const sameBand = Math.abs((a.y + a.h / 2) - (b.y + b.h / 2)) <= Math.max(a.h, b.h) * 0.6
+          if (sameBand) { autoPairs.push([ra, rb]); used.add(ra); used.add(rb) }
+          break
+        }
+      }
+      const singles = refOrder.filter(r => r && !used.has(r))
+      const seatsSorted = seats.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x))
+      const placed: (string | null)[] = Array(seatsSorted.length).fill(null)
+      let idx = 0
+      const placePair = (ra: string, rb: string) => {
+        while (idx < seatsSorted.length - 1 && placed[idx] !== null) idx++
+        if (idx < seatsSorted.length - 1) { placed[idx] = ra; placed[idx + 1] = rb; idx += 2 }
+      }
+      for (const [ra, rb] of manualPairs.map((p) => [p[0], p[1]] as [string, string])) placePair(ra, rb)
+      for (const [ra, rb] of autoPairs) placePair(ra, rb)
+      for (const r of singles) {
+        while (idx < seatsSorted.length && placed[idx] !== null) idx++
+        if (idx < seatsSorted.length) { placed[idx] = r; idx++ }
+      }
+      const idByRef = new Map<string, string>()
+      const nextSeats = seatsSorted.map((e, i) => {
+        const refId = placed[i]
+        const ne = { ...e, refId: refId ?? null }
+        if (refId) idByRef.set(refId, ne.id!)
+        return ne
+      })
+      if (manualStudentLinks.length > 0) {
+        const jointsBySeat = new Map<string, any[]>()
+        const get = (id: string) => jointsBySeat.get(id) || []
+        const put = (id: string, arr: any[]) => jointsBySeat.set(id, arr)
+        for (const link of manualStudentLinks) {
+          const aId = idByRef.get(link.ra)
+          const bId = idByRef.get(link.rb)
+          if (!aId || !bId) continue
+          const A = nextSeats.find(s => s.id === aId)!
+          const B = nextSeats.find(s => s.id === bId)!
+          const jr = computeEdgeJointRect({ x: A.x, y: A.y, w: A.w, h: A.h }, { x: B.x, y: B.y, w: B.w, h: B.h })
+          if (!jr) continue
+          if (link.kind === 'pair') {
+            const pid = link.pairId ?? uid('pair')
+            put(aId, [...get(aId), { otherId: bId, side: jr.aSide, t: jr.aT, kind: 'pair', pairId: pid }])
+            put(bId, [...get(bId), { otherId: aId, side: jr.bSide, t: jr.bT, kind: 'pair', pairId: pid }])
+          } else {
+            put(aId, [...get(aId), { otherId: bId, side: jr.aSide, t: jr.aT, kind: 'struct' }])
+            put(bId, [...get(bId), { otherId: aId, side: jr.bSide, t: jr.bT, kind: 'struct' }])
+          }
+        }
+        for (let i = 0; i < nextSeats.length; i++) {
+          const s = nextSeats[i]
+          const j = jointsBySeat.get(s.id!)
+          if (j && j.length) nextSeats[i] = { ...s, meta: { ...(s.meta || {}), joints: j } }
+        }
+      }
+      return nextSeats
+    }
 
-    // replace existing student elements; keep others and then realign fixed elements
+    const assignedSeats = assignWithPairs(newSeats)
+
     setElements(prev => realignFixedElements([
       ...prev.filter(e => e.type !== 'STUDENT'),
       ...fixed,
@@ -674,13 +756,94 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
     // Order seats by Y then X for stable assignment, then trim to n and set z
     newSeats.sort((a, b) => (a.y - b.y) || (a.x - b.x))
     const limitedSeats = newSeats.slice(0, n).map((e, i) => ({ ...e, z: i }))
-    // Assign refIds: first loaded students, then keep any existing refIds if present
-    const assigned = limitedSeats.map((e, i) => {
-      if (i < nStudents) return { ...e, refId: students[i].id }
-      const prevSeat = existingSeats[i]
-      if (prevSeat) return { ...e, refId: prevSeat.refId ?? null }
-      return e
-    })
+    const assignWithPairs = (seats: Element[]) => {
+      const prevSeats = existingSeats.filter(e => e.refId)
+      const refOrder = (nStudents > 0 ? students.map(s => s.id) : prevSeats.map(s => String(s.refId))).filter(Boolean)
+      const byId = new Map<string, Element>(elements.map(e => [e.id!, e]))
+      const manualPairs: Array<[string, string, string | undefined]> = []
+      const manualStudentLinks: Array<{ ra: string; rb: string; kind: 'pair' | 'struct'; pairId?: string }> = []
+      const seen = new Set<string>()
+      for (const a of prevSeats) {
+        const links: any[] = Array.isArray(a.meta?.joints) ? a.meta!.joints : []
+        for (const j of links) {
+          const b = byId.get(String(j.otherId))
+          if (!b || b.type !== 'STUDENT') continue
+          const ra = String(a.refId || '')
+          const rb = String(b.refId || '')
+          if (!ra || !rb) continue
+          const key = ra < rb ? `${ra}|${rb}` : `${rb}|${ra}`
+          if (!seen.has(key) && j.kind === 'pair') manualPairs.push([ra, rb, j.pairId ?? undefined])
+          manualStudentLinks.push({ ra, rb, kind: (j.kind === 'pair' ? 'pair' : 'struct'), pairId: j.pairId ?? undefined })
+        }
+      }
+      const used = new Set<string>(manualPairs.flatMap(p => [p[0], p[1]]))
+      const rowSorted = prevSeats.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x))
+      const autoPairs: Array<[string, string]> = []
+      for (let i = 0; i < rowSorted.length; i++) {
+        const a = rowSorted[i]
+        const ra = String(a.refId || '')
+        if (!ra || used.has(ra)) continue
+        let j = i + 1
+        while (j < rowSorted.length) {
+          const b = rowSorted[j]
+          const rb = String(b.refId || '')
+          if (!rb || used.has(rb)) { j++; continue }
+          const sameBand = Math.abs((a.y + a.h / 2) - (b.y + b.h / 2)) <= Math.max(a.h, b.h) * 0.6
+          if (sameBand) { autoPairs.push([ra, rb]); used.add(ra); used.add(rb) }
+          break
+        }
+      }
+      const singles = refOrder.filter(r => r && !used.has(r))
+      const seatsSorted = seats.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x))
+      const placed: (string | null)[] = Array(seatsSorted.length).fill(null)
+      let idx = 0
+      const placePair = (ra: string, rb: string) => {
+        while (idx < seatsSorted.length - 1 && placed[idx] !== null) idx++
+        if (idx < seatsSorted.length - 1) { placed[idx] = ra; placed[idx + 1] = rb; idx += 2 }
+      }
+      for (const [ra, rb] of manualPairs.map((p) => [p[0], p[1]] as [string, string])) placePair(ra, rb)
+      for (const [ra, rb] of autoPairs) placePair(ra, rb)
+      for (const r of singles) {
+        while (idx < seatsSorted.length && placed[idx] !== null) idx++
+        if (idx < seatsSorted.length) { placed[idx] = r; idx++ }
+      }
+      const idByRef = new Map<string, string>()
+      const nextSeats = seatsSorted.map((e, i) => {
+        const refId = placed[i]
+        const ne = { ...e, refId: refId ?? null }
+        if (refId) idByRef.set(refId, ne.id!)
+        return ne
+      })
+      if (manualStudentLinks.length > 0) {
+        const jointsBySeat = new Map<string, any[]>()
+        const get = (id: string) => jointsBySeat.get(id) || []
+        const put = (id: string, arr: any[]) => jointsBySeat.set(id, arr)
+        for (const link of manualStudentLinks) {
+          const aId = idByRef.get(link.ra)
+          const bId = idByRef.get(link.rb)
+          if (!aId || !bId) continue
+          const A = nextSeats.find(s => s.id === aId)!
+          const B = nextSeats.find(s => s.id === bId)!
+          const jr = computeEdgeJointRect({ x: A.x, y: A.y, w: A.w, h: A.h }, { x: B.x, y: B.y, w: B.w, h: B.h })
+          if (!jr) continue
+          if (link.kind === 'pair') {
+            const pid = link.pairId ?? uid('pair')
+            put(aId, [...get(aId), { otherId: bId, side: jr.aSide, t: jr.aT, kind: 'pair', pairId: pid }])
+            put(bId, [...get(bId), { otherId: aId, side: jr.bSide, t: jr.bT, kind: 'pair', pairId: pid }])
+          } else {
+            put(aId, [...get(aId), { otherId: bId, side: jr.aSide, t: jr.aT, kind: 'struct' }])
+            put(bId, [...get(bId), { otherId: aId, side: jr.bSide, t: jr.bT, kind: 'struct' }])
+          }
+        }
+        for (let i = 0; i < nextSeats.length; i++) {
+          const s = nextSeats[i]
+          const j = jointsBySeat.get(s.id!)
+          if (j && j.length) nextSeats[i] = { ...s, meta: { ...(s.meta || {}), joints: j } }
+        }
+      }
+      return nextSeats
+    }
+    const assigned = assignWithPairs(limitedSeats)
     setElements(prev => realignFixedElements([
       ...prev.filter(e => e.type !== 'STUDENT'),
       ...fixed,
@@ -782,13 +945,94 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
       }
     }
 
-    // Assign refIds consistently
-    const assigned = newSeats.map((e, i) => {
-      if (i < nStudents) return { ...e, refId: students[i].id }
-      const prevSeat = existingSeats[i]
-      if (prevSeat) return { ...e, refId: prevSeat.refId ?? null }
-      return e
-    })
+    const assignWithPairs = (seats: Element[]) => {
+      const prevSeats = existingSeats.filter(e => e.refId)
+      const refOrder = (nStudents > 0 ? students.map(s => s.id) : prevSeats.map(s => String(s.refId))).filter(Boolean)
+      const byId = new Map<string, Element>(elements.map(e => [e.id!, e]))
+      const manualPairs: Array<[string, string, string | undefined]> = []
+      const manualStudentLinks: Array<{ ra: string; rb: string; kind: 'pair' | 'struct'; pairId?: string }> = []
+      const seen = new Set<string>()
+      for (const a of prevSeats) {
+        const links: any[] = Array.isArray(a.meta?.joints) ? a.meta!.joints : []
+        for (const j of links) {
+          const b = byId.get(String(j.otherId))
+          if (!b || b.type !== 'STUDENT') continue
+          const ra = String(a.refId || '')
+          const rb = String(b.refId || '')
+          if (!ra || !rb) continue
+          const key = ra < rb ? `${ra}|${rb}` : `${rb}|${ra}`
+          if (!seen.has(key) && j.kind === 'pair') manualPairs.push([ra, rb, j.pairId ?? undefined])
+          manualStudentLinks.push({ ra, rb, kind: (j.kind === 'pair' ? 'pair' : 'struct'), pairId: j.pairId ?? undefined })
+        }
+      }
+      const used = new Set<string>(manualPairs.flatMap(p => [p[0], p[1]]))
+      const rowSorted = prevSeats.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x))
+      const autoPairs: Array<[string, string]> = []
+      for (let i = 0; i < rowSorted.length; i++) {
+        const a = rowSorted[i]
+        const ra = String(a.refId || '')
+        if (!ra || used.has(ra)) continue
+        let j = i + 1
+        while (j < rowSorted.length) {
+          const b = rowSorted[j]
+          const rb = String(b.refId || '')
+          if (!rb || used.has(rb)) { j++; continue }
+          const sameBand = Math.abs((a.y + a.h / 2) - (b.y + b.h / 2)) <= Math.max(a.h, b.h) * 0.6
+          if (sameBand) { autoPairs.push([ra, rb]); used.add(ra); used.add(rb) }
+          break
+        }
+      }
+      const singles = refOrder.filter(r => r && !used.has(r))
+      const seatsSorted = seats.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x))
+      const placed: (string | null)[] = Array(seatsSorted.length).fill(null)
+      let idx = 0
+      const placePair = (ra: string, rb: string) => {
+        while (idx < seatsSorted.length - 1 && placed[idx] !== null) idx++
+        if (idx < seatsSorted.length - 1) { placed[idx] = ra; placed[idx + 1] = rb; idx += 2 }
+      }
+      for (const [ra, rb] of manualPairs.map((p) => [p[0], p[1]] as [string, string])) placePair(ra, rb)
+      for (const [ra, rb] of autoPairs) placePair(ra, rb)
+      for (const r of singles) {
+        while (idx < seatsSorted.length && placed[idx] !== null) idx++
+        if (idx < seatsSorted.length) { placed[idx] = r; idx++ }
+      }
+      const idByRef = new Map<string, string>()
+      const nextSeats = seatsSorted.map((e, i) => {
+        const refId = placed[i]
+        const ne = { ...e, refId: refId ?? null }
+        if (refId) idByRef.set(refId, ne.id!)
+        return ne
+      })
+      if (manualStudentLinks.length > 0) {
+        const jointsBySeat = new Map<string, any[]>()
+        const get = (id: string) => jointsBySeat.get(id) || []
+        const put = (id: string, arr: any[]) => jointsBySeat.set(id, arr)
+        for (const link of manualStudentLinks) {
+          const aId = idByRef.get(link.ra)
+          const bId = idByRef.get(link.rb)
+          if (!aId || !bId) continue
+          const A = nextSeats.find(s => s.id === aId)!
+          const B = nextSeats.find(s => s.id === bId)!
+          const jr = computeEdgeJointRect({ x: A.x, y: A.y, w: A.w, h: A.h }, { x: B.x, y: B.y, w: B.w, h: B.h })
+          if (!jr) continue
+          if (link.kind === 'pair') {
+            const pid = link.pairId ?? uid('pair')
+            put(aId, [...get(aId), { otherId: bId, side: jr.aSide, t: jr.aT, kind: 'pair', pairId: pid }])
+            put(bId, [...get(bId), { otherId: aId, side: jr.bSide, t: jr.bT, kind: 'pair', pairId: pid }])
+          } else {
+            put(aId, [...get(aId), { otherId: bId, side: jr.aSide, t: jr.aT, kind: 'struct' }])
+            put(bId, [...get(bId), { otherId: aId, side: jr.bSide, t: jr.bT, kind: 'struct' }])
+          }
+        }
+        for (let i = 0; i < nextSeats.length; i++) {
+          const s = nextSeats[i]
+          const j = jointsBySeat.get(s.id!)
+          if (j && j.length) nextSeats[i] = { ...s, meta: { ...(s.meta || {}), joints: j } }
+        }
+      }
+      return nextSeats
+    }
+    const assigned = assignWithPairs(newSeats)
     setElements(prev => realignFixedElements([
       ...prev.filter(e => e.type !== 'STUDENT'),
       ...fixed,
