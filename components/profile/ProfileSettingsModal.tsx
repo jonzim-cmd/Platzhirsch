@@ -416,6 +416,22 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
     if (!configClassKey && first) setConfigClassKey(first.id || `name:${first.name}`)
   }, [rows, configClassKey])
 
+  // Build room options from global rooms + suggestions + currently selected values
+  const roomOptionValues = useMemo(() => {
+    const set = new Set<string>()
+    try {
+      for (const r of rooms || []) if (r?.name) set.add(r.name)
+    } catch {}
+    try {
+      for (const n of roomSuggestions || []) if (n) set.add(n)
+    } catch {}
+    try {
+      const sel = Array.from(classRooms[configClassKey] || [])
+      for (const n of sel) if (n) set.add(n)
+    } catch {}
+    return Array.from(set).sort((a,b)=>a.localeCompare(b,'de'))
+  }, [rooms, roomSuggestions, classRooms, configClassKey])
+
   function onClassesMultiSelectChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const sel = new Set(Array.from(e.target.selectedOptions).map(o => o.value))
     setRows(prev => {
@@ -566,11 +582,12 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                     </select>
                     <div className="flex gap-2 items-start">
                       <MultiSelect
-                        options={roomSuggestions.map(n => ({ value: n, label: n }))}
+                        options={roomOptionValues.map(n => ({ value: n, label: n }))}
                         selectedValues={Array.from(classRooms[configClassKey] || [])}
                         onChange={(vals) => setClassRooms(prev => ({ ...prev, [configClassKey]: new Set(vals) }))}
                         placeholder="Räume wählen…"
                         className="w-56"
+                        placement="up"
                       />
                       <Button size="sm" className="h-9" onClick={async ()=>{ const v = prompt('Fehlenden Raum hinzufügen:','')||''; if (v.trim()) await addRoomSuggestion(v.trim()) }}>+ fehlender Raum</Button>
                     </div>

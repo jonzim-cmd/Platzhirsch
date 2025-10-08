@@ -10,12 +10,14 @@ export function MultiSelect({
   onChange,
   placeholder = 'Auswählen…',
   className = '',
+  placement = 'down',
 }: {
   options: Option[]
   selectedValues: string[]
   onChange: (values: string[]) => void
   placeholder?: string
   className?: string
+  placement?: 'down' | 'up'
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
@@ -48,7 +50,10 @@ export function MultiSelect({
         {label}
       </button>
       {open && (
-        <div className="absolute mt-1 max-h-56 w-full overflow-auto rounded border border-neutral-800 bg-neutral-950 shadow-lg" style={{ zIndex: Z.dropdown }}>
+        <div
+          className={`absolute ${placement === 'up' ? 'bottom-full mb-1' : 'mt-1'} max-h-56 w-full overflow-auto rounded border border-neutral-800 bg-neutral-950 shadow-lg`}
+          style={{ zIndex: Z.dropdown }}
+        >
           <ul className="py-1 text-sm">
             {options.map(o => {
               const checked = selectedValues.includes(o.value)
