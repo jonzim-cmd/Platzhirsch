@@ -32,26 +32,29 @@ export function TopBar() {
   const profileInputRef = useRef<HTMLInputElement | null>(null)
   const [jumpToClasses, setJumpToClasses] = useState(false)
 
-  // Only show rooms that are assigned for the active profile (union across classes)
+  // Only show rooms assigned for the selected class within the active profile
   const visibleRooms = useMemo(() => {
     try {
       if (!activeProfile?.id) return rooms
       const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
       if (!raw) return rooms
       const mapping = JSON.parse(raw) as Record<string, string[]>
-      // Wenn Klassen geladen sind, berücksichtige nur deren IDs
-      const allowedClassIds = new Set((classes || []).map(c => c.id))
-      const byName = new Set<string>()
-      for (const [clsId, list] of Object.entries(mapping)) {
-        if (allowedClassIds.size > 0 && !allowedClassIds.has(clsId)) continue
-        ;(list || []).forEach(n => byName.add(n))
+      // If a class is selected, restrict rooms to that class only
+      if (classId) {
+        const norm = (s: string) => String(s || '').trim().toLowerCase()
+        const list = mapping[classId] || []
+        const allowed = new Set<string>(list.map(norm))
+        // If a class is selected but there is no mapping yet, show none to avoid leaking other classes' rooms
+        if (!Object.prototype.hasOwnProperty.call(mapping, classId)) return []
+        // Respect mapping strictly (including empty set)
+        return rooms.filter(r => allowed.has(norm(r.name)))
       }
-      if (byName.size === 0) return rooms
-      return rooms.filter(r => byName.has(r.name))
+      // Fallback: no class selected or no mapping for class -> show all rooms
+      return rooms
     } catch {
       return rooms
     }
-  }, [rooms, activeProfile?.id, classes])
+  }, [rooms, activeProfile?.id, classId])
 
   useEffect(() => {
     // Initial load: fetch lists, but do not restore any previous selection.
