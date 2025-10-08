@@ -37,7 +37,7 @@ export function TopBar() {
     try {
       if (!activeProfile?.id) return rooms
       const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
-      if (!raw) return rooms
+      if (!raw) return classId ? [] : rooms
       const mapping = JSON.parse(raw) as Record<string, string[]>
       // If a class is selected, restrict rooms to that class only
       if (classId) {
@@ -49,10 +49,10 @@ export function TopBar() {
         // Respect mapping strictly (including empty set)
         return rooms.filter(r => allowed.has(norm(r.name)))
       }
-      // Fallback: no class selected or no mapping for class -> show all rooms
+      // Fallback: no class selected -> show all rooms
       return rooms
     } catch {
-      return rooms
+      return classId ? [] : rooms
     }
   }, [rooms, activeProfile?.id, classId])
 
