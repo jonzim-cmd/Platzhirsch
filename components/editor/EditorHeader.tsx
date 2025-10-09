@@ -14,7 +14,7 @@ export function EditorHeader() {
 }
 
 function SaveGroup() {
-  const { undo, redo, canUndo, canRedo, readOnly, saving, loadingPlan, plan, classId, activeProfile, leadPlan, viewMode, setViewMode } = useEditor()
+  const { undo, redo, canUndo, canRedo, readOnly, saving, loadingPlan, plan, classId, activeProfile, leadPlan, viewMode, setViewMode, elements, setElements, historyCommit, scheduleSave } = useEditor()
   const [isLead, setIsLead] = useState(false)
   const [shared, setShared] = useState(false)
   const [shareBusy, setShareBusy] = useState(false)
@@ -22,6 +22,40 @@ function SaveGroup() {
   const canShare = useMemo(() => Boolean(isLead && plan && plan.title === null), [isLead, plan?.id, plan?.title])
   const disabledUndo = readOnly || !canUndo
   const disabledRedo = readOnly || !canRedo
+  const assignedSeatCount = useMemo(() => {
+    try {
+      const seats = Array.isArray(elements) ? elements.filter((e: any) => e?.type === 'STUDENT') : []
+      return seats.reduce((n, s) => n + (s?.refId ? 1 : 0), 0)
+    } catch { return 0 }
+  }, [elements])
+  const disabledRandom = readOnly || assignedSeatCount < 2
+
+  function randomizeAssignments() {
+    try {
+      historyCommit?.()
+      setElements((prev: any) => {
+        const currentIds: any[] = []
+        let count = 0
+        for (const el of prev) if (el?.type === 'STUDENT' && el?.refId) { currentIds.push(el.refId); count++ }
+        if (count < 2) return prev
+        // Shuffle in-place (copy first to avoid mutating original order semantics)
+        const ids = currentIds.slice()
+        for (let i = ids.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1))
+          const tmp = ids[i]; ids[i] = ids[j]; ids[j] = tmp
+        }
+        let k = 0
+        return prev.map((x: any) => {
+          if (x?.type === 'STUDENT' && x?.refId) {
+            const nextId = ids[k++]
+            return { ...x, refId: nextId }
+          }
+          return x
+        })
+      })
+      scheduleSave?.()
+    } catch { /* noop */ }
+  }
   useEffect(() => {
     let alive = true
     async function checkLead() {
@@ -106,6 +140,17 @@ function SaveGroup() {
           {toast === 'unshared' && <span className="text-fg-muted">Freigabe aufgehoben</span>}
         </div>
       )}
+      <div className="flex items-center gap-1 bg-neutral-950">
+        <Button
+          size="xs"
+          variant="subtle"
+          title="Zufällige Neuverteilung der Namen (nur Sitzplätze mit Namen)"
+          disabled={disabledRandom}
+          onClick={randomizeAssignments}
+        >
+          Zufall
+        </Button>
+      </div>
       <div className="flex items-center gap-1 bg-neutral-950">
         <button
           type="button"
