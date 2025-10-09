@@ -35,9 +35,9 @@ export function TopBar() {
   // Only show rooms assigned for the selected class within the active profile
   const visibleRooms = useMemo(() => {
     try {
-      if (!activeProfile?.id) return rooms
+      if (!activeProfile?.id) return []
       const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
-      if (!raw) return classId ? [] : rooms
+      if (!raw) return []
       const mapping = JSON.parse(raw) as Record<string, string[]>
       // If a class is selected, restrict rooms to that class only
       if (classId) {
@@ -49,10 +49,10 @@ export function TopBar() {
         // Respect mapping strictly (including empty set)
         return rooms.filter(r => allowed.has(norm(r.name)))
       }
-      // Fallback: no class selected -> show all rooms
-      return rooms
+      // No class selected -> show no rooms
+      return []
     } catch {
-      return classId ? [] : rooms
+      return []
     }
   }, [rooms, activeProfile?.id, classId])
 
@@ -153,6 +153,16 @@ export function TopBar() {
         try {
           const v = JSON.parse(e.newValue)
           setSidebarOpen(!!v.open)
+        } catch {}
+      }
+      if (e.key === 'openSettings' && e.newValue) {
+        try {
+          const v = JSON.parse(e.newValue)
+          if (v.open) {
+            setCreateMode(false)
+            setSettingsOpen(true)
+            setJumpToClasses(v.jumpTo === 'classes')
+          }
         } catch {}
       }
     }
@@ -374,7 +384,8 @@ export function TopBar() {
             <select
               value={roomId}
               onChange={(e)=>setRoomId(e.target.value)}
-              className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800"
+              disabled={!classId}
+              className="rounded bg-neutral-900 px-2 py-1 border border-neutral-800 disabled:opacity-50"
             >
               <option value="">Bitte auswählen…</option>
               {visibleRooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
