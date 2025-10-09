@@ -39,8 +39,8 @@ export function EditorSidebar() {
 
   return (
     <aside className={`fixed left-0 top-[48px] h-[calc(100vh-48px)] w-72 transform border-r border-neutral-900 bg-bg-soft p-3 overflow-auto transition-transform ${ctx.sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`} style={{ zIndex: Z.toolbar }}>
-      {/* Guard: No class selected -> show info, no students/functions */}
-      {!classId && (
+      {/* Guard: No class (or no Profil) selected -> show info, no students/functions */}
+      {(!classId || !ctx.activeProfile?.id) && (
         <div className="rounded border border-neutral-900 p-3 grid gap-2">
           <div className="text-sm font-medium">Klasse auswählen</div>
           <div className="text-xs text-fg-muted">Bitte wähle oben eine Klasse, um Schüler und Funktionen der Sidebar zu nutzen.</div>
@@ -58,8 +58,16 @@ export function EditorSidebar() {
         </div>
       )}
 
-      {/* When blocked (no rooms), do not show actionable sections below */}
-      {!!classId && !hasRoomsForSelectedClass ? null : (
+      {/* Guard: Has rooms but no specific room selected yet -> block functions with hint */}
+      {!!classId && hasRoomsForSelectedClass && !roomId && (
+        <div className="rounded border border-neutral-900 p-3 grid gap-2 mb-3">
+          <div className="text-sm font-medium">Raum auswählen</div>
+          <div className="text-xs text-fg-muted">Bitte wähle oben einen Raum, um einen Sitzplan zu erstellen oder zu bearbeiten.</div>
+        </div>
+      )}
+
+      {/* Only show actionable sections when class and room are selected and rooms are mapped */}
+      {classId && hasRoomsForSelectedClass && roomId ? (
         <>
       {/* Vorlagen */}
       <div className="rounded border border-neutral-900 p-3 mb-3 grid gap-2">
@@ -145,7 +153,7 @@ export function EditorSidebar() {
         </div>
       </div>
       </>
-      )}
+      ) : null}
     </aside>
   )
 }
