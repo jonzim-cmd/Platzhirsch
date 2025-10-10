@@ -419,8 +419,25 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
   const selectedClassNames = rows.filter(r=>r.assigned).map(r=>r.name)
   const [configClassKey, setConfigClassKey] = useState<string>('')
   useEffect(() => {
-    const first = rows.find(r=>r.assigned)
-    if (!configClassKey && first) setConfigClassKey(first.id || `name:${first.name}`)
+    if (configClassKey) return
+    // Prefer the class currently selected in the TopBar (URL param or selection snapshot)
+    let selectedClassId = ''
+    try {
+      const url = new URL(window.location.href)
+      selectedClassId = url.searchParams.get('c') || ''
+      if (!selectedClassId) {
+        const snapRaw = localStorage.getItem('selectionState')
+        if (snapRaw) selectedClassId = (JSON.parse(snapRaw)?.c as string) || ''
+      }
+    } catch {}
+    let target = undefined as ClassRow | undefined
+    if (selectedClassId) {
+      target = rows.find(r => r.assigned && r.id === selectedClassId)
+    }
+    if (!target) {
+      target = rows.find(r => r.assigned)
+    }
+    if (target) setConfigClassKey(target.id || `name:${target.name}`)
   }, [rows, configClassKey])
 
   // Build room options from global rooms + suggestions + currently selected values
