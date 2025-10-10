@@ -31,6 +31,17 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
   const planCacheRef = useRef<Map<string, { plan: Plan; leadPlan: Plan | null; elements: Element[]; ts: number }>>(new Map())
   const [loadingPlan, setLoadingPlan] = useState(false)
   const [clipboard, setClipboard] = useState<Element[] | null>(null)
+  // Mapping change version to react to localStorage classRooms updates
+  const [mappingVersion, setMappingVersion] = useState(0)
+
+  // Helper: broadcast current selection to other components (TopBar, etc.)
+  const broadcastSelection = useCallback(() => {
+    try {
+      const payload = { p: activeProfile?.id, c: classId || undefined, r: roomId || undefined, pl: planId || undefined }
+      window.dispatchEvent(new StorageEvent('storage', { key: 'selection', newValue: JSON.stringify(payload) }))
+      window.dispatchEvent(new CustomEvent('selection-changed', { detail: payload }))
+    } catch {}
+  }, [activeProfile?.id, classId, roomId, planId])
   // History (undo/redo) for element state
   const historyRef = useRef<{ past: Element[][]; future: Element[][] }>({ past: [], future: [] })
   const [canUndo, setCanUndo] = useState(false)
@@ -1137,6 +1148,18 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
         if (c) setClassId(c)
         if (r) setRoomId(r)
         if (pl) setPlanId(pl)
+        // fallback: if URL lacks params, try last selection snapshot
+        if (!c || !r || !pl) {
+          try {
+            const snapRaw = localStorage.getItem('selectionState')
+            if (snapRaw) {
+              const snap = JSON.parse(snapRaw)
+              if (!c && snap?.c) setClassId(snap.c)
+              if (!r && snap?.r) setRoomId(snap.r)
+              if (!pl && snap?.pl) setPlanId(snap.pl)
+            }
+          } catch {}
+        }
       } catch { setActiveProfile(null) }
     }
     read()
@@ -1157,10 +1180,81 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
         } catch {}
       }
     }
+    const onSelectionCustom = (e: any) => {
+      try {
+        const v = e?.detail || {}
+        if (v?.c) setClassId(v.c)
+        if (v?.r) setRoomId(v.r)
+        if (v?.pl) setPlanId(v.pl)
+      } catch {}
+    }
     window.addEventListener('storage', onSidebar)
     window.addEventListener('storage', onSelection)
-    return () => window.removeEventListener('storage', h)
+    window.addEventListener('selection-changed', onSelectionCustom as any)
+    const onMapping = (e: StorageEvent) => {
+      try {
+        if (e.key === 'dataChanged') setMappingVersion(v => v + 1)
+        if (e.key && e.key.startsWith('profile:') && e.key.endsWith(':classRooms')) setMappingVersion(v => v + 1)
+      } catch {}
+    }
+    window.addEventListener('storage', onMapping)
+    const onDataChangedCustom = () => setMappingVersion(v => v + 1)
+    window.addEventListener('data-changed', onDataChangedCustom as any)
+    return () => {
+      window.removeEventListener('storage', h)
+      window.removeEventListener('storage', onSidebar)
+      window.removeEventListener('storage', onSelection)
+      window.removeEventListener('selection-changed', onSelectionCustom as any)
+      window.removeEventListener('storage', onMapping)
+      window.removeEventListener('data-changed', onDataChangedCustom as any)
+    }
   }, [])
+
+  // Derived: whether selected class has any rooms for current profile
+  const hasRoomsForSelectedClass = useMemo(() => {
+    try {
+      if (!classId) return false
+      if (!activeProfile?.id) return false
+      const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
+      if (!raw) return false
+      const mapping = JSON.parse(raw) as Record<string, string[]>
+      const hasClass = Object.prototype.hasOwnProperty.call(mapping, classId)
+      const arr = (hasClass ? (mapping[classId] || []) : []) as string[]
+      // If a room is selected, only treat as valid if that room is actually allowed by mapping
+      if (roomId) {
+        const norm = (s: string) => String(s || '').trim().toLowerCase()
+        const room = rooms.find(r => r.id === roomId)
+        if (!room) return false
+        const allowed = new Set(arr.map(norm))
+        return allowed.has(norm(room.name))
+      }
+      // Otherwise, any non-empty mapping array unlocks the sidebar
+      return Array.isArray(arr) && arr.length > 0
+    } catch { return false }
+  }, [activeProfile?.id, classId, roomId, mappingVersion])
+
+  // If current selected room becomes invalid for the mapping, clear it and broadcast
+  useEffect(() => {
+    try {
+      if (!roomId || !activeProfile?.id || !classId) return
+      const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
+      const mapping = raw ? (JSON.parse(raw) as Record<string, string[]>) : null
+      if (!mapping || !Object.prototype.hasOwnProperty.call(mapping, classId)) {
+        setRoomId('')
+        broadcastSelection()
+        return
+      }
+      const arr = mapping[classId] || []
+      const room = rooms.find(r => r.id === roomId)
+      if (!room) { setRoomId(''); broadcastSelection(); return }
+      const norm = (s: string) => String(s || '').trim().toLowerCase()
+      const allowed = new Set(arr.map(norm))
+      if (!allowed.has(norm(room.name))) {
+        setRoomId('')
+        broadcastSelection()
+      }
+    } catch { /* ignore */ }
+  }, [mappingVersion, classId, activeProfile?.id, roomId, rooms, broadcastSelection])
 
   // Load students when class changes
   useEffect(() => {
@@ -2402,6 +2496,7 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
     moveElementBy, onDragEnd, setElements, students, classId, roomId, loadPlan,
     setMarquee, marquee, editing, setEditing, detachOnDragRef, dragStartPositions,
     sidebarOpen, activeProfile, setTypeStyles, removeSelected, setStudents,
+    hasRoomsForSelectedClass,
     tryCreateJointAt, updateJointHover, jointHover, setJointHover, createJointFromCandidate,
     markManual: () => { autoCenterDoneRef.current = true },
     centerAll,

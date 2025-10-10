@@ -303,7 +303,12 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
           const sel = classRooms[r.id] || classRooms[`name:${r.name}`] || new Set<string>()
           mapping[key] = Array.from(sel)
         }
-        localStorage.setItem(`profile:${pid}:classRooms`, JSON.stringify(mapping))
+        const mKey = `profile:${pid}:classRooms`
+        const mVal = JSON.stringify(mapping)
+        localStorage.setItem(mKey, mVal)
+        // Same-window notification: storage event (legacy) + custom event (robust)
+        try { window.dispatchEvent(new StorageEvent('storage', { key: mKey, newValue: mVal })) } catch {}
+        try { window.dispatchEvent(new CustomEvent('data-changed', { detail: { type: 'classRooms', profileId: pid } })) } catch {}
       } catch {}
       // mark as changed but keep modal open for further edits
       setChanged(true)
@@ -312,8 +317,10 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
       // broadcast data change so TopBar refreshes lists without closing modal
       try {
         const stamp = Date.now()
-        localStorage.setItem('dataChanged', JSON.stringify({ t: stamp, p: pid }))
-        window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: JSON.stringify({ t: stamp, p: pid }) }))
+        const payload = JSON.stringify({ t: stamp, p: pid })
+        localStorage.setItem('dataChanged', payload)
+        window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: payload }))
+        window.dispatchEvent(new CustomEvent('data-changed', { detail: { type: 'dataChanged', profileId: pid } }))
       } catch {}
       // update baselines after successful save
       baselineRowsRef.current = rows.map(r => ({ ...r }))
@@ -745,10 +752,13 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                               const url = new URL(window.location.href)
                               url.searchParams.delete('p'); url.searchParams.delete('c'); url.searchParams.delete('r'); url.searchParams.delete('pl')
                               window.history.replaceState({}, '', url.toString())
-                              window.dispatchEvent(new StorageEvent('storage', { key: 'selection', newValue: JSON.stringify({ p: undefined, c: undefined, r: undefined, pl: undefined }) }))
+                              const sel = JSON.stringify({ p: undefined, c: undefined, r: undefined, pl: undefined })
+                              window.dispatchEvent(new StorageEvent('storage', { key: 'selection', newValue: sel }))
                               const stamp = Date.now()
-                              localStorage.setItem('dataChanged', JSON.stringify({ t: stamp }))
-                              window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: JSON.stringify({ t: stamp }) }))
+                              const payload = JSON.stringify({ t: stamp })
+                              localStorage.setItem('dataChanged', payload)
+                              window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: payload }))
+                              window.dispatchEvent(new CustomEvent('data-changed', { detail: { type: 'reset' } }))
                             } catch {}
                             onClose(true)
                             setTimeout(() => window.location.reload(), 50)
@@ -798,8 +808,10 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                             localStorage.removeItem('activeProfile')
                           }
                           const stamp = Date.now()
-                          localStorage.setItem('dataChanged', JSON.stringify({ t: stamp }))
-                          window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: JSON.stringify({ t: stamp }) }))
+                          const payload = JSON.stringify({ t: stamp })
+                          localStorage.setItem('dataChanged', payload)
+                          window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: payload }))
+                          window.dispatchEvent(new CustomEvent('data-changed', { detail: { type: 'profile-delete', profileId: pid } }))
                         } catch {}
                         onClose(true)
                       }}

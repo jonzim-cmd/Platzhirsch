@@ -14,20 +14,8 @@ export function EditorSidebar() {
     return students.filter((s: any) => String(s.foreName || '').toLowerCase().includes(q))
   }, [studentQuery, students])
 
-  // Determine if the currently selected class has any rooms assigned for the active profile
-  const hasRoomsForSelectedClass = useMemo(() => {
-    try {
-      if (!ctx.activeProfile?.id || !classId) return false
-      const raw = localStorage.getItem(`profile:${ctx.activeProfile.id}:classRooms`)
-      if (!raw) return false
-      const mapping = JSON.parse(raw) as Record<string, string[]>
-      if (!Object.prototype.hasOwnProperty.call(mapping, classId)) return false
-      const arr = mapping[classId] || []
-      return Array.isArray(arr) && arr.length > 0
-    } catch {
-      return false
-    }
-  }, [ctx.activeProfile?.id, classId])
+  // Single source of truth: derive from editor state
+  const hasRoomsForSelectedClass = ctx.hasRoomsForSelectedClass
 
   const openSettingsModal = () => {
     try {

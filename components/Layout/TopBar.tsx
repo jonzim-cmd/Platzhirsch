@@ -18,6 +18,8 @@ export function TopBar() {
   const [roomId, setRoomId] = useState('')
   const [plans, setPlans] = useState<PlanRow[]>([])
   const [planId, setPlanId] = useState('')
+  // Track mapping changes stored in localStorage to recompute visible rooms immediately
+  const [mappingVersion, setMappingVersion] = useState(0)
   // Derive a selected plan id that prefers the default plan when none chosen yet
   const computedPlanId = useMemo(() => {
     return planId || plans.find(p => p.isDefault)?.id || plans[0]?.id || ''
@@ -54,7 +56,21 @@ export function TopBar() {
     } catch {
       return []
     }
-  }, [rooms, activeProfile?.id, classId])
+  }, [rooms, activeProfile?.id, classId, mappingVersion])
+
+  // React to localStorage mapping changes (same-tab) to refresh room options
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      try {
+        if (e.key === 'dataChanged') setMappingVersion(v => v + 1)
+        if (e.key && e.key.startsWith('profile:') && e.key.endsWith(':classRooms')) setMappingVersion(v => v + 1)
+      } catch {}
+    }
+    window.addEventListener('storage', onStorage)
+    const onCustom = () => setMappingVersion(v => v + 1)
+    window.addEventListener('data-changed', onCustom as any)
+    return () => { window.removeEventListener('storage', onStorage); window.removeEventListener('data-changed', onCustom as any) }
+  }, [])
 
   useEffect(() => {
     // Initial load: fetch lists, but do not restore any previous selection.
@@ -180,6 +196,8 @@ export function TopBar() {
     })
     // sync URL/localStorage
     localStorage.setItem('activeProfile', JSON.stringify(activeProfile))
+    // notify same-tab listeners explicitly (storage event doesn't fire in same tab)
+    try { window.dispatchEvent(new StorageEvent('storage', { key: 'activeProfile', newValue: JSON.stringify(activeProfile) })) } catch {}
     // On profile change: reset class and room dropdowns to "Bitte auswählen…"
     if (classId) setClassId('')
     if (roomId) setRoomId('')
@@ -193,6 +211,16 @@ export function TopBar() {
     if (!roomId) return
     if (!visibleRooms.some(r => r.id === roomId)) setRoomId('')
   }, [visibleRooms, roomId])
+
+  // After rooms are (newly) mapped for the selected class, auto-select the first available room
+  useEffect(() => {
+    if (!activeProfile?.id) return
+    if (!classId) return
+    if (roomId) return
+    if (visibleRooms.length > 0) {
+      setRoomId(visibleRooms[0].id)
+    }
+  }, [activeProfile?.id, classId, roomId, visibleRooms, mappingVersion])
 
   // Clear plan selection on class/room change so new context decides default
   useEffect(() => {
@@ -256,8 +284,12 @@ export function TopBar() {
     if (r) url.searchParams.set('r', r)
     if (pl) url.searchParams.set('pl', pl)
     window.history.replaceState({}, '', url.toString())
-    // also broadcast to other components
+    // Persist selection snapshot for robustness and broadcast to same-tab listeners
+    try { localStorage.setItem('selectionState', JSON.stringify({ p, c, r, pl })) } catch {}
+    // legacy: synthetic storage event (used across codebase)
     window.dispatchEvent(new StorageEvent('storage', { key: 'selection', newValue: JSON.stringify({ p, c, r, pl }) }))
+    // explicit same-tab custom event
+    try { window.dispatchEvent(new CustomEvent('selection-changed', { detail: { p, c, r, pl } })) } catch {}
   }
 
   const profileLabel = useMemo(() => 'Bitte auswählen…', [])
@@ -275,6 +307,7 @@ export function TopBar() {
       setCreatingProfile(false)
       setProfileDraftName('')
       localStorage.setItem('activeProfile', JSON.stringify(newProfile))
+      try { window.dispatchEvent(new StorageEvent('storage', { key: 'activeProfile', newValue: JSON.stringify(newProfile) })) } catch {}
       updateUrl(newProfile.id, undefined, undefined, undefined)
       // open settings to finish setup (classes/rooms/etc.)
       setCreateMode(false)
@@ -295,6 +328,7 @@ export function TopBar() {
       setRenamingProfile(false)
       setProfileDraftName('')
       localStorage.setItem('activeProfile', JSON.stringify(updated))
+      try { window.dispatchEvent(new StorageEvent('storage', { key: 'activeProfile', newValue: JSON.stringify(updated) })) } catch {}
       updateUrl(updated.id, classId || undefined, roomId || undefined, planId || undefined)
     } catch { /* noop */ }
   }
