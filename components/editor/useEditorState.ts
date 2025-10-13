@@ -1234,32 +1234,25 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
       if (!classId) return false
       if (!activeProfile?.id) return false
       const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
-      if (raw) {
-        const mapping = JSON.parse(raw) as Record<string, string[]>
-        const hasClass = Object.prototype.hasOwnProperty.call(mapping, classId)
-        const arr = (hasClass ? (mapping[classId] || []) : []) as string[]
-        if (hasClass) {
-          if (roomId) {
-            const norm = (s: string) => String(s || '').trim().toLowerCase()
-            const room = rooms.find(r => r.id === roomId)
-            if (!room) return false
-            const allowed = new Set(arr.map(norm))
-            return allowed.has(norm(room.name))
-          }
-          return Array.isArray(arr) && arr.length > 0
-        }
+      const mapping = raw ? (JSON.parse(raw) as Record<string, string[]>) : null
+      const hasClass = mapping ? Object.prototype.hasOwnProperty.call(mapping, classId) : false
+      const arr = (hasClass ? (mapping![classId] || []) : []) as string[]
+      const norm = (s: string) => String(s || '').trim().toLowerCase()
+      const allowedByLocal = new Set(arr.map(norm))
+      const allowedByServerIds = new Set(serverRooms.map(r => r.id))
+      if (roomId) {
+        const room = rooms.find(r => r.id === roomId)
+        if (!room) return false
+        const okLocal = hasClass && allowedByLocal.has(norm(room.name))
+        const okServer = allowedByServerIds.has(room.id)
+        return okLocal || okServer
       }
-      // Fallback to server-derived availability when no local mapping exists for the class
-      if (serverRooms.length > 0) {
-        if (roomId) {
-          const exists = serverRooms.some(r => r.id === roomId)
-          return exists
-        }
-        return true
-      }
-      return false
+      // No concrete room picked: true if either local mapping has entries or server returns rooms
+      const anyLocal = hasClass && Array.isArray(arr) && arr.length > 0
+      const anyServer = serverRooms.length > 0
+      return anyLocal || anyServer
     } catch { return false }
-  }, [activeProfile?.id, classId, roomId, mappingVersion, serverRooms])
+  }, [activeProfile?.id, classId, roomId, mappingVersion, serverRooms, rooms])
 
   // If current selected room becomes invalid for the mapping, clear it and broadcast
   useEffect(() => {
@@ -1270,18 +1263,11 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
       const room = rooms.find(r => r.id === roomId)
       if (!room) { setRoomId(''); broadcastSelection(); return }
       const norm = (s: string) => String(s || '').trim().toLowerCase()
-      // If local mapping exists for this class, validate against it strictly
-      if (mapping && Object.prototype.hasOwnProperty.call(mapping, classId)) {
-        const arr = mapping[classId] || []
-        const allowed = new Set(arr.map(norm))
-        if (!allowed.has(norm(room.name))) { setRoomId(''); broadcastSelection() }
-        return
-      }
-      // Otherwise validate against server-derived rooms
-      if (serverRooms.length > 0) {
-        const exists = serverRooms.some(r => r.id === roomId)
-        if (!exists) { setRoomId(''); broadcastSelection() }
-      }
+      const okLocal = (mapping && Object.prototype.hasOwnProperty.call(mapping, classId))
+        ? new Set((mapping[classId] || []).map(norm)).has(norm(room.name))
+        : false
+      const okServer = serverRooms.some(r => r.id === roomId)
+      if (!(okLocal || okServer)) { setRoomId(''); broadcastSelection() }
     } catch { /* ignore */ }
   }, [mappingVersion, classId, activeProfile?.id, roomId, rooms, broadcastSelection, serverRooms])
 

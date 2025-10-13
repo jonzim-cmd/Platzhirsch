@@ -440,31 +440,33 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
     if (target) setConfigClassKey(target.id || `name:${target.name}`)
   }, [rows, configClassKey])
 
-  // Prefill selected rooms from server for the focused class if no local mapping exists (cross-device fallback)
+  // Merge server-derived rooms for the focused class into the local selection (keeps Schaltzentrale in Sync)
   useEffect(() => {
     const pid = profile?.id || selectedProfileId || ''
     if (!pid) return
     const key = configClassKey
     if (!key) return
-    // Only attempt when the focused class has a persisted id
     const row = rows.find(r => (r.id || `name:${r.name}`) === key)
     const clsId = row?.id
     if (!clsId) return
-    if (classRooms[key] && (classRooms[key] as Set<string>).size > 0) return
     let cancelled = false
     ;(async () => {
       try {
         const res = await fetch(`/api/class-rooms?ownerProfileId=${pid}&classId=${clsId}`)
         if (!res.ok) return
         const data = await res.json()
-        const roomNames: string[] = Array.isArray(data?.rooms) ? (data.rooms as any[]).map(r => r?.name).filter((n: any) => !!n) : []
-        if (!cancelled && roomNames.length > 0) {
-          setClassRooms(prev => ({ ...prev, [key]: new Set(roomNames) }))
-        }
+        const roomNames: string[] = Array.isArray(data?.rooms) ? (data.rooms as any[]).map(r => String(r?.name || '').trim()).filter(Boolean) : []
+        if (cancelled || roomNames.length === 0) return
+        setClassRooms(prev => {
+          const existing = new Set(prev[key] || [])
+          let changed = false
+          for (const n of roomNames) if (!existing.has(n)) { existing.add(n); changed = true }
+          return changed ? { ...prev, [key]: existing } : prev
+        })
       } catch { /* ignore */ }
     })()
     return () => { cancelled = true }
-  }, [profile?.id, selectedProfileId, configClassKey, rows, classRooms])
+  }, [profile?.id, selectedProfileId, configClassKey, rows])
 
   // Build room options from global rooms + suggestions + currently selected values
   const roomOptionValues = useMemo(() => {
