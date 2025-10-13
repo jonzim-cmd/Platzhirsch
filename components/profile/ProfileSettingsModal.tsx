@@ -440,7 +440,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
     if (target) setConfigClassKey(target.id || `name:${target.name}`)
   }, [rows, configClassKey])
 
-  // Merge server-derived rooms for the focused class into the local selection (keeps Schaltzentrale in Sync)
+  // Merge server-derived rooms for the focused class into the local selection (nur wenn lokal noch nichts gesetzt ist)
   useEffect(() => {
     const pid = profile?.id || selectedProfileId || ''
     if (!pid) return
@@ -449,6 +449,8 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
     const row = rows.find(r => (r.id || `name:${r.name}`) === key)
     const clsId = row?.id
     if (!clsId) return
+    // Wenn bereits lokale Auswahl existiert, nicht vom Server wieder auffüllen (ermöglicht Entfernen)
+    if ((classRooms[key] && (classRooms[key] as Set<string>).size > 0)) return
     let cancelled = false
     ;(async () => {
       try {
@@ -466,7 +468,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
       } catch { /* ignore */ }
     })()
     return () => { cancelled = true }
-  }, [profile?.id, selectedProfileId, configClassKey, rows])
+  }, [profile?.id, selectedProfileId, configClassKey, rows, classRooms])
 
   // Build room options from global rooms + suggestions + currently selected values
   const roomOptionValues = useMemo(() => {

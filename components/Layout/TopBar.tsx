@@ -56,25 +56,19 @@ export function TopBar() {
     try {
       if (!activeProfile?.id) return []
       if (!classId) return []
-      // Prefer local mapping if present for this class
       const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
       const norm = (s: string) => String(s || '').trim().toLowerCase()
-      let byLocal: Room[] = []
       if (raw) {
         const mapping = JSON.parse(raw) as Record<string, string[]>
         if (Object.prototype.hasOwnProperty.call(mapping, classId)) {
           const list = mapping[classId] || []
           const allowed = new Set<string>(list.map(norm))
-          byLocal = rooms.filter(r => allowed.has(norm(r.name)))
+          return rooms.filter(r => allowed.has(norm(r.name)))
         }
       }
+      // Fallback: server-seitig bekannte Räume (aus Plänen), wenn kein lokales Mapping existiert
       const byServerIds = new Set(serverAllowedRooms.map(r => r.id))
-      const byServer = rooms.filter(r => byServerIds.has(r.id))
-      // Union: bevorzugt lokale Auswahl, ergänzt um serverseitig bekannte Räume
-      const acc = new Map<string, Room>()
-      for (const r of byLocal) acc.set(r.id, r)
-      for (const r of byServer) acc.set(r.id, r)
-      return Array.from(acc.values())
+      return rooms.filter(r => byServerIds.has(r.id))
     } catch {
       return []
     }
