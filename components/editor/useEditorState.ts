@@ -33,6 +33,8 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
   const [clipboard, setClipboard] = useState<Element[] | null>(null)
   // Mapping change version to react to localStorage classRooms updates
   const [mappingVersion, setMappingVersion] = useState(0)
+  // Server-derived allowed rooms for the selected class (cross-device fallback)
+  const [serverRooms, setServerRooms] = useState<{ id: string; name: string }[]>([])
 
   // Helper: broadcast current selection to other components (TopBar, etc.)
   const broadcastSelection = useCallback(() => {
@@ -1210,28 +1212,54 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
     }
   }, [])
 
+  // Fetch server-derived allowed rooms for current (owner, class)
+  useEffect(() => {
+    const ownerId = activeProfile?.id
+    if (!ownerId || !classId) { setServerRooms([]); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/class-rooms?ownerProfileId=${ownerId}&classId=${classId}`)
+        if (!res.ok) { if (!cancelled) setServerRooms([]); return }
+        const data = await res.json()
+        if (!cancelled) setServerRooms(Array.isArray(data?.rooms) ? data.rooms : [])
+      } catch { if (!cancelled) setServerRooms([]) }
+    })()
+    return () => { cancelled = true }
+  }, [activeProfile?.id, classId])
+
   // Derived: whether selected class has any rooms for current profile
   const hasRoomsForSelectedClass = useMemo(() => {
     try {
       if (!classId) return false
       if (!activeProfile?.id) return false
       const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
-      if (!raw) return false
-      const mapping = JSON.parse(raw) as Record<string, string[]>
-      const hasClass = Object.prototype.hasOwnProperty.call(mapping, classId)
-      const arr = (hasClass ? (mapping[classId] || []) : []) as string[]
-      // If a room is selected, only treat as valid if that room is actually allowed by mapping
-      if (roomId) {
-        const norm = (s: string) => String(s || '').trim().toLowerCase()
-        const room = rooms.find(r => r.id === roomId)
-        if (!room) return false
-        const allowed = new Set(arr.map(norm))
-        return allowed.has(norm(room.name))
+      if (raw) {
+        const mapping = JSON.parse(raw) as Record<string, string[]>
+        const hasClass = Object.prototype.hasOwnProperty.call(mapping, classId)
+        const arr = (hasClass ? (mapping[classId] || []) : []) as string[]
+        if (hasClass) {
+          if (roomId) {
+            const norm = (s: string) => String(s || '').trim().toLowerCase()
+            const room = rooms.find(r => r.id === roomId)
+            if (!room) return false
+            const allowed = new Set(arr.map(norm))
+            return allowed.has(norm(room.name))
+          }
+          return Array.isArray(arr) && arr.length > 0
+        }
       }
-      // Otherwise, any non-empty mapping array unlocks the sidebar
-      return Array.isArray(arr) && arr.length > 0
+      // Fallback to server-derived availability when no local mapping exists for the class
+      if (serverRooms.length > 0) {
+        if (roomId) {
+          const exists = serverRooms.some(r => r.id === roomId)
+          return exists
+        }
+        return true
+      }
+      return false
     } catch { return false }
-  }, [activeProfile?.id, classId, roomId, mappingVersion])
+  }, [activeProfile?.id, classId, roomId, mappingVersion, serverRooms])
 
   // If current selected room becomes invalid for the mapping, clear it and broadcast
   useEffect(() => {
@@ -1239,22 +1267,23 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
       if (!roomId || !activeProfile?.id || !classId) return
       const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
       const mapping = raw ? (JSON.parse(raw) as Record<string, string[]>) : null
-      if (!mapping || !Object.prototype.hasOwnProperty.call(mapping, classId)) {
-        setRoomId('')
-        broadcastSelection()
-        return
-      }
-      const arr = mapping[classId] || []
       const room = rooms.find(r => r.id === roomId)
       if (!room) { setRoomId(''); broadcastSelection(); return }
       const norm = (s: string) => String(s || '').trim().toLowerCase()
-      const allowed = new Set(arr.map(norm))
-      if (!allowed.has(norm(room.name))) {
-        setRoomId('')
-        broadcastSelection()
+      // If local mapping exists for this class, validate against it strictly
+      if (mapping && Object.prototype.hasOwnProperty.call(mapping, classId)) {
+        const arr = mapping[classId] || []
+        const allowed = new Set(arr.map(norm))
+        if (!allowed.has(norm(room.name))) { setRoomId(''); broadcastSelection() }
+        return
+      }
+      // Otherwise validate against server-derived rooms
+      if (serverRooms.length > 0) {
+        const exists = serverRooms.some(r => r.id === roomId)
+        if (!exists) { setRoomId(''); broadcastSelection() }
       }
     } catch { /* ignore */ }
-  }, [mappingVersion, classId, activeProfile?.id, roomId, rooms, broadcastSelection])
+  }, [mappingVersion, classId, activeProfile?.id, roomId, rooms, broadcastSelection, serverRooms])
 
   // Load students when class changes
   useEffect(() => {

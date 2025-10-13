@@ -34,29 +34,49 @@ export function TopBar() {
   const profileInputRef = useRef<HTMLInputElement | null>(null)
   const [jumpToClasses, setJumpToClasses] = useState(false)
 
+  // Server-derived allowed rooms for the selected class (fallback across devices)
+  const [serverAllowedRooms, setServerAllowedRooms] = useState<Room[]>([])
+  useEffect(() => {
+    const ownerId = activeProfile?.id
+    if (!ownerId || !classId) { setServerAllowedRooms([]); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/class-rooms?ownerProfileId=${ownerId}&classId=${classId}`)
+        if (!res.ok) { if (!cancelled) setServerAllowedRooms([]); return }
+        const data = await res.json()
+        if (!cancelled) setServerAllowedRooms(Array.isArray(data?.rooms) ? data.rooms : [])
+      } catch { if (!cancelled) setServerAllowedRooms([]) }
+    })()
+    return () => { cancelled = true }
+  }, [activeProfile?.id, classId])
+
   // Only show rooms assigned for the selected class within the active profile
   const visibleRooms = useMemo(() => {
     try {
       if (!activeProfile?.id) return []
+      if (!classId) return []
+      // Prefer local mapping if present for this class
       const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
-      if (!raw) return []
-      const mapping = JSON.parse(raw) as Record<string, string[]>
-      // If a class is selected, restrict rooms to that class only
-      if (classId) {
-        const norm = (s: string) => String(s || '').trim().toLowerCase()
-        const list = mapping[classId] || []
-        const allowed = new Set<string>(list.map(norm))
-        // If a class is selected but there is no mapping yet, show none to avoid leaking other classes' rooms
-        if (!Object.prototype.hasOwnProperty.call(mapping, classId)) return []
-        // Respect mapping strictly (including empty set)
-        return rooms.filter(r => allowed.has(norm(r.name)))
+      if (raw) {
+        const mapping = JSON.parse(raw) as Record<string, string[]>
+        if (Object.prototype.hasOwnProperty.call(mapping, classId)) {
+          const norm = (s: string) => String(s || '').trim().toLowerCase()
+          const list = mapping[classId] || []
+          const allowed = new Set<string>(list.map(norm))
+          return rooms.filter(r => allowed.has(norm(r.name)))
+        }
       }
-      // No class selected -> show no rooms
+      // Fallback: derive from server plans (cross-device)
+      if (serverAllowedRooms.length > 0) {
+        const allowedIds = new Set(serverAllowedRooms.map(r => r.id))
+        return rooms.filter(r => allowedIds.has(r.id))
+      }
       return []
     } catch {
       return []
     }
-  }, [rooms, activeProfile?.id, classId, mappingVersion])
+  }, [rooms, activeProfile?.id, classId, mappingVersion, serverAllowedRooms])
 
   // React to localStorage mapping changes (same-tab) to refresh room options
   useEffect(() => {
