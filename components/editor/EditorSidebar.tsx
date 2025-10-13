@@ -20,8 +20,7 @@ export function EditorSidebar() {
   const openSettingsModal = () => {
     try {
       const payload = { open: true, jumpTo: 'classes' }
-      localStorage.setItem('openSettings', JSON.stringify(payload))
-      window.dispatchEvent(new StorageEvent('storage', { key: 'openSettings', newValue: JSON.stringify(payload) }))
+      window.dispatchEvent(new CustomEvent('open-settings', { detail: payload }) as any)
     } catch {}
   }
 

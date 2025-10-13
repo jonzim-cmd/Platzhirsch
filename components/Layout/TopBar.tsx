@@ -18,7 +18,7 @@ export function TopBar() {
   const [roomId, setRoomId] = useState('')
   const [plans, setPlans] = useState<PlanRow[]>([])
   const [planId, setPlanId] = useState('')
-  // Track mapping changes stored in localStorage to recompute visible rooms immediately
+  // Version flag to refetch server mapping when updated
   const [mappingVersion, setMappingVersion] = useState(0)
   // Derive a selected plan id that prefers the default plan when none chosen yet
   const computedPlanId = useMemo(() => {
@@ -49,24 +49,13 @@ export function TopBar() {
       } catch { if (!cancelled) setServerAllowedRooms([]) }
     })()
     return () => { cancelled = true }
-  }, [activeProfile?.id, classId])
+  }, [activeProfile?.id, classId, mappingVersion])
 
-  // Only show rooms assigned for the selected class within the active profile
+  // Only show rooms assigned for the selected class within the active profile (server-side)
   const visibleRooms = useMemo(() => {
     try {
       if (!activeProfile?.id) return []
       if (!classId) return []
-      const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
-      const norm = (s: string) => String(s || '').trim().toLowerCase()
-      if (raw) {
-        const mapping = JSON.parse(raw) as Record<string, string[]>
-        if (Object.prototype.hasOwnProperty.call(mapping, classId)) {
-          const list = mapping[classId] || []
-          const allowed = new Set<string>(list.map(norm))
-          return rooms.filter(r => allowed.has(norm(r.name)))
-        }
-      }
-      // Fallback: server-seitig bekannte Räume (aus Plänen), wenn kein lokales Mapping existiert
       const byServerIds = new Set(serverAllowedRooms.map(r => r.id))
       return rooms.filter(r => byServerIds.has(r.id))
     } catch {
@@ -74,18 +63,13 @@ export function TopBar() {
     }
   }, [rooms, activeProfile?.id, classId, mappingVersion, serverAllowedRooms])
 
-  // React to localStorage mapping changes (same-tab) to refresh room options
+  // Listen for explicit mapping updates from Modal (same-tab)
   useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      try {
-        if (e.key === 'dataChanged') setMappingVersion(v => v + 1)
-        if (e.key && e.key.startsWith('profile:') && e.key.endsWith(':classRooms')) setMappingVersion(v => v + 1)
-      } catch {}
+    const onMapping = (e: any) => {
+      setMappingVersion(v => v + 1)
     }
-    window.addEventListener('storage', onStorage)
-    const onCustom = () => setMappingVersion(v => v + 1)
-    window.addEventListener('data-changed', onCustom as any)
-    return () => { window.removeEventListener('storage', onStorage); window.removeEventListener('data-changed', onCustom as any) }
+    window.addEventListener('mapping-updated', onMapping as any)
+    return () => window.removeEventListener('mapping-updated', onMapping as any)
   }, [])
 
   useEffect(() => {
@@ -131,39 +115,6 @@ export function TopBar() {
             })()
           }
         } catch {}
-      } else if (e.key === 'dataChanged') {
-        // refresh lists (profiles, rooms, and classes for active profile)
-        ;(async () => {
-          try {
-            const [ps, rs] = await Promise.all([
-              fetch('/api/profiles').then(r=>r.json()),
-              fetch('/api/rooms').then(r=>r.json())
-            ])
-            setProfiles(ps)
-            setRooms(rs)
-            if (activeProfile) {
-              const cls = await fetch(`/api/classes?profileId=${activeProfile.id}`).then(r=>r.json())
-              setClasses(cls)
-              // If current class selection no longer exists, clear it
-              if (cls.findIndex((k: any) => k.id === classId) === -1) setClassId('')
-              const updated = ps.find((p: any) => p.id === activeProfile.id)
-              if (updated) {
-                setActiveProfile(updated)
-                localStorage.setItem('activeProfile', JSON.stringify(updated))
-              } else {
-                // Active profile no longer exists: clear selection immediately
-                setActiveProfile(null)
-                setClassId('')
-                setRoomId('')
-                setPlanId('')
-                try {
-                  localStorage.removeItem('activeProfile')
-                } catch {}
-                updateUrl(undefined, undefined, undefined, undefined)
-              }
-            }
-          } catch { /* noop */ }
-        })()
       }
     }
     window.addEventListener('storage', onSelection)
@@ -178,28 +129,17 @@ export function TopBar() {
     }
   }, [creatingProfile, renamingProfile])
 
-  // Keep local sidebar state in sync with global storage events
+  // Keep local sidebar/settings state in sync via custom events (no browser storage)
   useEffect(() => {
-    const onSidebar = (e: StorageEvent) => {
-      if (e.key === 'sidebar' && e.newValue) {
-        try {
-          const v = JSON.parse(e.newValue)
-          setSidebarOpen(!!v.open)
-        } catch {}
-      }
-      if (e.key === 'openSettings' && e.newValue) {
-        try {
-          const v = JSON.parse(e.newValue)
-          if (v.open) {
-            setCreateMode(false)
-            setSettingsOpen(true)
-            setJumpToClasses(v.jumpTo === 'classes')
-          }
-        } catch {}
-      }
+    const onSidebar = (e: any) => {
+      try { const v = e?.detail || {}; if (typeof v.open === 'boolean') setSidebarOpen(!!v.open) } catch {}
     }
-    window.addEventListener('storage', onSidebar)
-    return () => window.removeEventListener('storage', onSidebar)
+    const onOpenSettings = (e: any) => {
+      try { const v = e?.detail || {}; if (v.open) { setCreateMode(false); setSettingsOpen(true); setJumpToClasses(v.jumpTo === 'classes') } } catch {}
+    }
+    window.addEventListener('sidebar-toggle', onSidebar as any)
+    window.addEventListener('open-settings', onOpenSettings as any)
+    return () => { window.removeEventListener('sidebar-toggle', onSidebar as any); window.removeEventListener('open-settings', onOpenSettings as any) }
   }, [])
 
   // whenever profile changes, load its classes
@@ -210,10 +150,7 @@ export function TopBar() {
       // if currently selected class not in list, clear
       if (cls.findIndex(k=>k.id===classId)===-1) setClassId('')
     })
-    // sync URL/localStorage
-    localStorage.setItem('activeProfile', JSON.stringify(activeProfile))
-    // notify same-tab listeners explicitly (storage event doesn't fire in same tab)
-    try { window.dispatchEvent(new StorageEvent('storage', { key: 'activeProfile', newValue: JSON.stringify(activeProfile) })) } catch {}
+    // sync URL only (no browser storage)
     // On profile change: reset class and room dropdowns to "Bitte auswählen…"
     if (classId) setClassId('')
     if (roomId) setRoomId('')
@@ -300,9 +237,7 @@ export function TopBar() {
     if (r) url.searchParams.set('r', r)
     if (pl) url.searchParams.set('pl', pl)
     window.history.replaceState({}, '', url.toString())
-    // Persist selection snapshot for robustness and broadcast to same-tab listeners
-    try { localStorage.setItem('selectionState', JSON.stringify({ p, c, r, pl })) } catch {}
-    // legacy: synthetic storage event (used across codebase)
+    // synthetic storage event (used as app-wide signal)
     window.dispatchEvent(new StorageEvent('storage', { key: 'selection', newValue: JSON.stringify({ p, c, r, pl }) }))
     // explicit same-tab custom event
     try { window.dispatchEvent(new CustomEvent('selection-changed', { detail: { p, c, r, pl } })) } catch {}
@@ -322,8 +257,6 @@ export function TopBar() {
       setActiveProfile(newProfile)
       setCreatingProfile(false)
       setProfileDraftName('')
-      localStorage.setItem('activeProfile', JSON.stringify(newProfile))
-      try { window.dispatchEvent(new StorageEvent('storage', { key: 'activeProfile', newValue: JSON.stringify(newProfile) })) } catch {}
       updateUrl(newProfile.id, undefined, undefined, undefined)
       // open settings to finish setup (classes/rooms/etc.)
       setCreateMode(false)
@@ -343,8 +276,6 @@ export function TopBar() {
       setActiveProfile(updated)
       setRenamingProfile(false)
       setProfileDraftName('')
-      localStorage.setItem('activeProfile', JSON.stringify(updated))
-      try { window.dispatchEvent(new StorageEvent('storage', { key: 'activeProfile', newValue: JSON.stringify(updated) })) } catch {}
       updateUrl(updated.id, classId || undefined, roomId || undefined, planId || undefined)
     } catch { /* noop */ }
   }
@@ -356,7 +287,7 @@ export function TopBar() {
           <Button aria-label="Sidebar umschalten" onClick={() => {
             const next = !sidebarOpen
             setSidebarOpen(next)
-            window.dispatchEvent(new StorageEvent('storage', { key: 'sidebar', newValue: JSON.stringify({ open: next }) }))
+            window.dispatchEvent(new CustomEvent('sidebar-toggle', { detail: { open: next } }) as any)
           }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <line x1="3" y1="6" x2="21" y2="6" />

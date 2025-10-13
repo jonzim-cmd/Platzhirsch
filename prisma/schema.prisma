@@ -42,6 +42,7 @@ model Room {
   name  String
   type  RoomType @default(NORMAL)
   plans SeatingPlan[]
+  profileClassRooms ProfileClassRoom[]
 
   @@unique([name])
 }
@@ -95,6 +96,19 @@ model SeatingElement {
   z             Int   @default(0)
   groupId       String?
   meta          Json?
+}
+
+/// Mapping which rooms a profile has assigned to a class (server-side, cross-device)
+model ProfileClassRoom {
+  profileId String
+  classId   String
+  roomId    String
+
+  profile Profile @relation(fields: [profileId], references: [id])
+  class   Class   @relation(fields: [classId], references: [id])
+  room    Room    @relation(fields: [roomId], references: [id])
+
+  @@id([profileId, classId, roomId])
 }
 
 enum ElementType {

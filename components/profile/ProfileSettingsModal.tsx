@@ -17,20 +17,8 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
 
   // Profiles
   const [allProfiles, setAllProfiles] = useState<{ id: string; name: string }[]>([])
-  const [selectedProfileId, setSelectedProfileId] = useState<string>(() => {
-    try {
-      const lp = localStorage.getItem('activeProfile')
-      if (lp) return (JSON.parse(lp)?.id as string) || ''
-    } catch {}
-    return profile?.id || ''
-  })
-  const [name, setName] = useState(() => {
-    try {
-      const lp = localStorage.getItem('activeProfile')
-      if (lp) return (JSON.parse(lp)?.name as string) || (profile?.name || '')
-    } catch {}
-    return profile?.name || ''
-  })
+  const [selectedProfileId, setSelectedProfileId] = useState<string>(() => profile?.id || '')
+  const [name, setName] = useState(() => profile?.name || '')
   const nameInputRef = useRef<HTMLInputElement | null>(null)
 
   // Classes and rooms
@@ -77,6 +65,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
     '11Z'
   ])
   // Rooms per assigned class (by classId if known, else by name prefixed with name:)
+  // Ephemeral selection state (no localStorage)
   const [classRooms, setClassRooms] = useState<Record<string, Set<string>>>({})
 
   async function addRoomSuggestion(name: string) {
@@ -134,16 +123,6 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
         })
       // Rooms
       fetchWithTimeout('/api/rooms').then(async (r) => setRooms(await r.json())).catch(()=>setRooms([]))
-      // Load per-class room mapping from localStorage
-      try {
-        const raw = localStorage.getItem(`profile:${pid}:classRooms`)
-        if (raw) {
-          const obj = JSON.parse(raw) as Record<string, string[]>
-          const m: Record<string, Set<string>> = {}
-          for (const k of Object.keys(obj)) m[k] = new Set(obj[k])
-          setClassRooms(m)
-        }
-      } catch {}
       // Named Plans archive
       fetchWithTimeout(`/api/plans?ownerProfileId=${pid}&all=1`).then(async (r) => {
         if (!r.ok) return setPlans([])
@@ -294,34 +273,23 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
 
       await Promise.all([...membershipTasks, ...leadTasks, ...roomTasks])
 
-      // persist class->rooms mapping in localStorage (by classId)
+      // Persist mapping for the currently configured class (server-side)
       try {
-        const mapping: Record<string, string[]> = {}
-        for (const r of rows) {
-          if (!r.id || !r.assigned) continue
-          const key = r.id
-          const sel = classRooms[r.id] || classRooms[`name:${r.name}`] || new Set<string>()
-          mapping[key] = Array.from(sel)
+        const key = configClassKey
+        const row = rows.find(r => (r.id || `name:${r.name}`) === key)
+        const clsId = row?.id || ''
+        if (clsId) {
+          const sel = Array.from(classRooms[key] || [])
+          await fetch('/api/class-rooms', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ownerProfileId: pid, classId: clsId, roomNames: sel }) })
+          try { window.dispatchEvent(new CustomEvent('mapping-updated', { detail: { profileId: pid, classId: clsId } })) } catch {}
         }
-        const mKey = `profile:${pid}:classRooms`
-        const mVal = JSON.stringify(mapping)
-        localStorage.setItem(mKey, mVal)
-        // Same-window notification: storage event (legacy) + custom event (robust)
-        try { window.dispatchEvent(new StorageEvent('storage', { key: mKey, newValue: mVal })) } catch {}
-        try { window.dispatchEvent(new CustomEvent('data-changed', { detail: { type: 'classRooms', profileId: pid } })) } catch {}
       } catch {}
       // mark as changed but keep modal open for further edits
       setChanged(true)
       setJustSaved(true)
       setTimeout(() => setJustSaved(false), 900)
-      // broadcast data change so TopBar refreshes lists without closing modal
-      try {
-        const stamp = Date.now()
-        const payload = JSON.stringify({ t: stamp, p: pid })
-        localStorage.setItem('dataChanged', payload)
-        window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: payload }))
-        window.dispatchEvent(new CustomEvent('data-changed', { detail: { type: 'dataChanged', profileId: pid } }))
-      } catch {}
+      // Notify same-tab consumers (TopBar/Editor) to refetch mapping as needed
+      try { window.dispatchEvent(new CustomEvent('data-changed', { detail: { type: 'dataChanged', profileId: pid } })) } catch {}
       // update baselines after successful save
       baselineRowsRef.current = rows.map(r => ({ ...r }))
       baselineProfileRef.current = pid
@@ -397,38 +365,18 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
     setPlans(prev => prev.filter(p => p.id !== id))
   }
 
-  // Meine Klassenleitung: client-seitig per Profil-ID (kein DB-Feld, auf Wunsch erweiterbar)
-  const [leadClassLocal, setLeadClassLocal] = useState<string | null>(null)
-  useEffect(() => {
-    try {
-      if (profile?.id) {
-        const k = `profile:${profile.id}:leadClass`
-        const v = localStorage.getItem(k)
-        setLeadClassLocal(v)
-      }
-    } catch {}
-  }, [profile?.id])
-  function saveLeadClassLocal(val: string | null) {
-    if (!profile?.id) return
-    const k = `profile:${profile.id}:leadClass`
-    if (val) localStorage.setItem(k, val); else localStorage.removeItem(k)
-    setLeadClassLocal(val)
-  }
+  // Removed legacy local lead class preference (no browser storage)
 
   // helpers for multi-select controls
   const selectedClassNames = rows.filter(r=>r.assigned).map(r=>r.name)
   const [configClassKey, setConfigClassKey] = useState<string>('')
   useEffect(() => {
     if (configClassKey) return
-    // Prefer the class currently selected in the TopBar (URL param or selection snapshot)
+    // Prefer the class currently selected in the TopBar via URL
     let selectedClassId = ''
     try {
       const url = new URL(window.location.href)
       selectedClassId = url.searchParams.get('c') || ''
-      if (!selectedClassId) {
-        const snapRaw = localStorage.getItem('selectionState')
-        if (snapRaw) selectedClassId = (JSON.parse(snapRaw)?.c as string) || ''
-      }
     } catch {}
     let target = undefined as ClassRow | undefined
     if (selectedClassId) {
@@ -548,10 +496,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                               .catch(()=>{ setRows([]); baselineRowsRef.current = []; baselineProfileRef.current = v; baselineLeadIdRef.current = null })
                             fetch('/api/rooms').then(r=>r.json()).then(setRooms).catch(()=>setRooms([]))
                             fetch(`/api/plans?ownerProfileId=${v}&all=1`).then(r=>r.json()).then(d=>setPlans(d?.plans||[])).catch(()=>setPlans([]))
-                            try {
-                              const raw = localStorage.getItem(`profile:${v}:classRooms`)
-                              setClassRooms(raw?Object.fromEntries(Object.entries(JSON.parse(raw)).map(([k,arr])=>[k,new Set(arr as string[])])): {})
-                            } catch { setClassRooms({}) }
+                            setClassRooms({})
                           }
                         }}>
                         <option value="">– auswählen –</option>
@@ -659,17 +604,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                         const confirmName = prompt('Zum Löschen Profilnamen eingeben:')
                         if (!confirmName || confirmName !== (current?.name || '')) return
                         await fetch(`/api/profiles/${pid}`, { method: 'DELETE' })
-                        try {
-                          const raw = localStorage.getItem('activeProfile')
-                          const act = raw ? JSON.parse(raw) : null
-                          if (act?.id === pid) {
-                            localStorage.removeItem('activeProfile')
-                            // Clear current selection across app immediately
-                            window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: JSON.stringify({ t: Date.now() }) }))
-                          } else {
-                            window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: JSON.stringify({ t: Date.now() }) }))
-                          }
-                        } catch {}
+                        try { window.dispatchEvent(new CustomEvent('data-changed', { detail: { type: 'profile-delete', profileId: pid } })) } catch {}
                         onClose(true)
                       }}
                     >Profil löschen</Button>
@@ -737,11 +672,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                               if (res.ok) setStudents(await res.json())
                             } catch {}
                             // Globale Aktualisierung signalisieren (z. B. für TopBar)
-                            try {
-                              const stamp = Date.now()
-                              localStorage.setItem('dataChanged', JSON.stringify({ t: stamp }))
-                              window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: JSON.stringify({ t: stamp }) }))
-                            } catch {}
+                            try { window.dispatchEvent(new CustomEvent('data-changed', { detail: { type: 'students-import' } })) } catch {}
                           }} />
                         </div>
                       </div>
@@ -793,18 +724,13 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                           try {
                             const res = await fetch('/api/admin/reset', { method: 'POST' })
                             if (!res.ok) throw new Error('reset failed')
-                            // Clear local selection and broadcast change
+                            // Clear selection in URL and broadcast change (no browser storage)
                             try {
-                              localStorage.removeItem('activeProfile')
                               const url = new URL(window.location.href)
                               url.searchParams.delete('p'); url.searchParams.delete('c'); url.searchParams.delete('r'); url.searchParams.delete('pl')
                               window.history.replaceState({}, '', url.toString())
                               const sel = JSON.stringify({ p: undefined, c: undefined, r: undefined, pl: undefined })
                               window.dispatchEvent(new StorageEvent('storage', { key: 'selection', newValue: sel }))
-                              const stamp = Date.now()
-                              const payload = JSON.stringify({ t: stamp })
-                              localStorage.setItem('dataChanged', payload)
-                              window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: payload }))
                               window.dispatchEvent(new CustomEvent('data-changed', { detail: { type: 'reset' } }))
                             } catch {}
                             onClose(true)
@@ -848,18 +774,7 @@ export function ProfileSettingsModal({ createMode, profile, onClose, jumpTo }: {
                         const confirmName = prompt('Zum Löschen bitte Profilnamen eingeben:')
                         if (!confirmName || confirmName !== (current?.name || '')) return
                         await fetch(`/api/profiles/${pid}`, { method: 'DELETE' })
-                        try {
-                          const raw = localStorage.getItem('activeProfile')
-                          const act = raw ? JSON.parse(raw) : null
-                          if (act?.id === pid) {
-                            localStorage.removeItem('activeProfile')
-                          }
-                          const stamp = Date.now()
-                          const payload = JSON.stringify({ t: stamp })
-                          localStorage.setItem('dataChanged', payload)
-                          window.dispatchEvent(new StorageEvent('storage', { key: 'dataChanged', newValue: payload }))
-                          window.dispatchEvent(new CustomEvent('data-changed', { detail: { type: 'profile-delete', profileId: pid } }))
-                        } catch {}
+                        try { window.dispatchEvent(new CustomEvent('data-changed', { detail: { type: 'profile-delete', profileId: pid } })) } catch {}
                         onClose(true)
                       }}
                     >Profil löschen</Button>

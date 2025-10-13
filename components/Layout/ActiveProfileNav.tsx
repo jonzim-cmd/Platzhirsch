@@ -6,18 +6,17 @@ export function ActiveProfileNav() {
   useEffect(() => {
     const read = () => {
       try {
-        const raw = localStorage.getItem('activeProfile')
-        if (!raw) return setName(null)
-        const parsed = JSON.parse(raw)
-        setName(parsed?.name ?? null)
-      } catch {
+        const url = new URL(window.location.href)
+        const p = url.searchParams.get('p')
+        if (!p) return setName(null)
+        // We don't have the profile name here; hide the badge or fetch if needed.
         setName(null)
-      }
+      } catch { setName(null) }
     }
     read()
-    const handler = () => read()
-    window.addEventListener('storage', handler)
-    return () => window.removeEventListener('storage', handler)
+    const onSelection = (e: StorageEvent) => { if (e.key === 'selection' && e.newValue) read() }
+    window.addEventListener('storage', onSelection)
+    return () => window.removeEventListener('storage', onSelection)
   }, [])
 
   if (!name) return null
@@ -25,4 +24,3 @@ export function ActiveProfileNav() {
     <span className="ml-2 rounded bg-neutral-800 px-2 py-1 text-xs text-fg">{name}</span>
   )
 }
-

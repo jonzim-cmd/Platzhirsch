@@ -1141,37 +1141,21 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
   useEffect(() => {
     const read = () => {
       try {
-        const raw = localStorage.getItem('activeProfile')
-        setActiveProfile(raw ? JSON.parse(raw) : null)
         const url = new URL(window.location.href)
+        const p = url.searchParams.get('p')
+        setActiveProfile(p ? { id: p, name: '' } : null)
         const c = url.searchParams.get('c')
         const r = url.searchParams.get('r')
         const pl = url.searchParams.get('pl')
         if (c) setClassId(c)
         if (r) setRoomId(r)
         if (pl) setPlanId(pl)
-        // fallback: if URL lacks params, try last selection snapshot
-        if (!c || !r || !pl) {
-          try {
-            const snapRaw = localStorage.getItem('selectionState')
-            if (snapRaw) {
-              const snap = JSON.parse(snapRaw)
-              if (!c && snap?.c) setClassId(snap.c)
-              if (!r && snap?.r) setRoomId(snap.r)
-              if (!pl && snap?.pl) setPlanId(snap.pl)
-            }
-          } catch {}
-        }
       } catch { setActiveProfile(null) }
     }
     read()
     const h = () => read()
     window.addEventListener('storage', h)
-    const onSidebar = (e: StorageEvent) => {
-      if (e.key === 'sidebar' && e.newValue) {
-        try { const v = JSON.parse(e.newValue); setSidebarOpen(!!v.open) } catch{}
-      }
-    }
+    const onSidebarCustom = (e: any) => { try { const v = e?.detail || {}; if (typeof v.open === 'boolean') setSidebarOpen(!!v.open) } catch {} }
     const onSelection = (e: StorageEvent) => {
       if (e.key === 'selection' && e.newValue) {
         try {
@@ -1190,24 +1174,16 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
         if (v?.pl) setPlanId(v.pl)
       } catch {}
     }
-    window.addEventListener('storage', onSidebar)
+    window.addEventListener('sidebar-toggle', onSidebarCustom as any)
     window.addEventListener('storage', onSelection)
     window.addEventListener('selection-changed', onSelectionCustom as any)
-    const onMapping = (e: StorageEvent) => {
-      try {
-        if (e.key === 'dataChanged') setMappingVersion(v => v + 1)
-        if (e.key && e.key.startsWith('profile:') && e.key.endsWith(':classRooms')) setMappingVersion(v => v + 1)
-      } catch {}
-    }
-    window.addEventListener('storage', onMapping)
     const onDataChangedCustom = () => setMappingVersion(v => v + 1)
     window.addEventListener('data-changed', onDataChangedCustom as any)
     return () => {
       window.removeEventListener('storage', h)
-      window.removeEventListener('storage', onSidebar)
+      window.removeEventListener('sidebar-toggle', onSidebarCustom as any)
       window.removeEventListener('storage', onSelection)
       window.removeEventListener('selection-changed', onSelectionCustom as any)
-      window.removeEventListener('storage', onMapping)
       window.removeEventListener('data-changed', onDataChangedCustom as any)
     }
   }, [])
@@ -1226,30 +1202,14 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
       } catch { if (!cancelled) setServerRooms([]) }
     })()
     return () => { cancelled = true }
-  }, [activeProfile?.id, classId])
+  }, [activeProfile?.id, classId, mappingVersion])
 
   // Derived: whether selected class has any rooms for current profile
   const hasRoomsForSelectedClass = useMemo(() => {
     try {
       if (!classId) return false
       if (!activeProfile?.id) return false
-      const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
-      if (raw) {
-        const mapping = JSON.parse(raw) as Record<string, string[]>
-        const hasClass = Object.prototype.hasOwnProperty.call(mapping, classId)
-        const arr = (hasClass ? (mapping[classId] || []) : []) as string[]
-        if (hasClass) {
-          if (roomId) {
-            const norm = (s: string) => String(s || '').trim().toLowerCase()
-            const room = rooms.find(r => r.id === roomId)
-            if (!room) return false
-            const allowed = new Set(arr.map(norm))
-            return allowed.has(norm(room.name))
-          }
-          return Array.isArray(arr) && arr.length > 0
-        }
-      }
-      // Fallback to server-derived availability when no local mapping exists for the class
+      // Server-derived availability
       if (serverRooms.length > 0) {
         if (roomId) {
           const exists = serverRooms.some(r => r.id === roomId)
@@ -1265,19 +1225,8 @@ export function useEditorState({ classes, rooms }: { classes: { id: string; name
   useEffect(() => {
     try {
       if (!roomId || !activeProfile?.id || !classId) return
-      const raw = localStorage.getItem(`profile:${activeProfile.id}:classRooms`)
-      const mapping = raw ? (JSON.parse(raw) as Record<string, string[]>) : null
       const room = rooms.find(r => r.id === roomId)
       if (!room) { setRoomId(''); broadcastSelection(); return }
-      const norm = (s: string) => String(s || '').trim().toLowerCase()
-      // If local mapping exists for this class, validate against it strictly
-      if (mapping && Object.prototype.hasOwnProperty.call(mapping, classId)) {
-        const arr = mapping[classId] || []
-        const allowed = new Set(arr.map(norm))
-        if (!allowed.has(norm(room.name))) { setRoomId(''); broadcastSelection() }
-        return
-      }
-      // Otherwise validate against server-derived rooms
       if (serverRooms.length > 0) {
         const exists = serverRooms.some(r => r.id === roomId)
         if (!exists) { setRoomId(''); broadcastSelection() }

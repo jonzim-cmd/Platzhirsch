@@ -41,7 +41,7 @@ export function EditorView() {
           style={{ zIndex: Z.overlay }}
           onClick={() => {
             try {
-              window.dispatchEvent(new StorageEvent('storage', { key: 'sidebar', newValue: JSON.stringify({ open: false }) }))
+              window.dispatchEvent(new CustomEvent('sidebar-toggle', { detail: { open: false } }) as any)
             } catch {}
           }}
         />
