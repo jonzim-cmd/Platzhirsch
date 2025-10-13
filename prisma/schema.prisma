@@ -6,6 +6,9 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  // Optional: use non-pooled connection for migrations/long transactions
+  // Set env var DATABASE_URL_UNPOOLED to the non-pgbouncer host if desired.
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 model Profile {
@@ -14,6 +17,7 @@ model Profile {
   ownedPlans SeatingPlan[]
   leadClasses Class[] @relation("ClassLead")
   classes ProfileClass[]
+  profileClassRooms ProfileClassRoom[]
 }
 
 model Class {
@@ -24,6 +28,7 @@ model Class {
   students      Student[]
   plans         SeatingPlan[]
   profiles      ProfileClass[]
+  profileClassRooms ProfileClassRoom[]
 
   @@unique([name])
 }

@@ -92,6 +92,11 @@ export function TopBar() {
       if (e.key === 'selection' && e.newValue) {
         try {
           const v = JSON.parse(e.newValue)
+          // Update active profile from selection if provided
+          if (v?.p) {
+            const prof = profiles.find(x => x.id === v.p) || null
+            setActiveProfile(prof)
+          }
           // Do not change active profile from external events
           if (v?.c) setClassId(v.c)
           if (v?.r) setRoomId(v.r)

@@ -9,7 +9,7 @@
     "lint": "next lint",
     "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:dev": "scripts/prisma-dev.sh migrate dev",
     "prisma:deploy": "prisma migrate deploy"
   },
   "dependencies": {

@@ -9,8 +9,13 @@ export function ActiveProfileNav() {
         const url = new URL(window.location.href)
         const p = url.searchParams.get('p')
         if (!p) return setName(null)
-        // We don't have the profile name here; hide the badge or fetch if needed.
-        setName(null)
+        ;(async () => {
+          try {
+            const list = await fetch('/api/profiles').then(r=>r.json())
+            const prof = Array.isArray(list) ? list.find((x: any) => x.id === p) : null
+            setName(prof?.name || null)
+          } catch { setName(null) }
+        })()
       } catch { setName(null) }
     }
     read()
